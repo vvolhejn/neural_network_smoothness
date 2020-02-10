@@ -1,0 +1,9 @@
+*.swp
+logs/
+.idea/
+venv/
+
+# Python
+*.egg-info/
+__pycache__/
+*.pyc
