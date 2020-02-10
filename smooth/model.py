@@ -1,4 +1,6 @@
 import datetime
+import re
+import os
 
 import numpy as np
 import tensorflow as tf
@@ -50,17 +52,17 @@ class MetricsCallback(keras.callbacks.Callback):
     def on_test_end(self, logs={}):
         history = self.model.history.history
 
-        for k in ["val_roughness", "val_l2"]:
+        for k in ["roughness", "l2"]:
             if k not in history:
                 history[k] = []
 
         roughness = get_roughness(self.model, self.x_val[:self.max_roughness_samples])
         l2 = get_average_l2(self.model)
-        history["val_roughness"].append(roughness)
-        history["val_l2"].append(l2)
+        history["roughness"].append(roughness)
+        history["l2"].append(l2)
         step = len(history["loss"]) + 1
-        tf.summary.scalar("val_roughness", data=roughness, step=step)
-        tf.summary.scalar("val_l2", data=l2, step=step)
+        tf.summary.scalar("roughness", data=roughness, step=step)
+        tf.summary.scalar("l2", data=l2, step=step)
 
 
 #         predict = np.asarray(self.model.predict(self.validation_data[0]))
@@ -87,6 +89,18 @@ def split_dataset(x, y, first_part=0.9):
     return x_train, y_train, x_val, y_val
 
 
+def get_model_id(**kwargs):
+    return "{}-{}".format(
+        "exp0210-1",
+        # datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+        "_".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value)
+                  for key, value in sorted(kwargs.items())))
+    )
+
+
+LOG_DIR = "logs/"
+
+
 def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size=200, epochs=1000, batch_size=512):
     model = tf.keras.Sequential()
     model.add(keras.layers.Flatten(input_shape=dataset.x_train[0].shape))
@@ -110,23 +124,34 @@ def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size
     metrics_cb = MetricsCallback(x_val, y_val)
 
     # tqdm_cb = TqdmCallbackFixed(verbose=0)
-    validation_freq = 50
+    validation_freq = 100
     model.validation_freq = validation_freq
-
-    log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    model.id = get_model_id(
+        learning_rate=learning_rate,
+        init_scale=init_scale,
+        hidden_size=hidden_size,
+        epochs=epochs,
+        batch_size=batch_size,
+    )
+    log_dir = os.path.join(LOG_DIR, model.id)
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, profile_batch=0)
-    file_writer = tf.summary.create_file_writer(log_dir + "/metrics")
+    file_writer = tf.summary.create_file_writer(log_dir + "/train")
     file_writer.set_as_default()
+
+    # checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(LOG_DIR, model_id, "checkpoints"),
+    #                                                          save_weights_only=False,
+    #                                                          verbose=1)
 
     model.fit(x_train, y_train,
               epochs=epochs,
               shuffle=True,
               batch_size=batch_size,
-              verbose=1,
+              verbose=0,
               callbacks=[  # tqdm_cb,
                   metrics_cb,
                   tf.keras.callbacks.EarlyStopping("loss", min_delta=1e-5, patience=500),
-                  tensorboard_callback
+                  tensorboard_callback,
+                  # checkpoint_callback,
               ],
               validation_data=(x_val, y_val),
               validation_freq=validation_freq,  # evaluate once every <validation_freq> epochs
