@@ -1,2 +1,2 @@
 #!/bin/bash
-PYTHONPATH=$(pwd) python3 smooth/main.py
+PYTHONPATH=$PYTHONPATH:$(pwd) python3 smooth/main.py

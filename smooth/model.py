@@ -91,14 +91,14 @@ def split_dataset(x, y, first_part=0.9):
 
 def get_model_id(**kwargs):
     return "{}-{}".format(
-        "exp0210-1",
+        "exp0211-1",
         # datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
         "_".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value)
                   for key, value in sorted(kwargs.items())))
     )
 
 
-LOG_DIR = "logs/"
+LOG_DIR = "logs_mnist_dd/"
 
 
 def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size=200, epochs=1000, batch_size=512):
@@ -124,7 +124,7 @@ def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size
     metrics_cb = MetricsCallback(x_val, y_val)
 
     # tqdm_cb = TqdmCallbackFixed(verbose=0)
-    validation_freq = 100
+    validation_freq = 500
     model.validation_freq = validation_freq
     model.id = get_model_id(
         learning_rate=learning_rate,
@@ -134,7 +134,13 @@ def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size
         batch_size=batch_size,
     )
     log_dir = os.path.join(LOG_DIR, model.id)
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, profile_batch=0)
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+        log_dir=log_dir,
+        profile_batch=0,
+        write_graph=False,
+        histogram_freq=100,
+        update_freq=int(1e5), # "batch"
+    )
     file_writer = tf.summary.create_file_writer(log_dir + "/train")
     file_writer.set_as_default()
 
