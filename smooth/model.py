@@ -13,9 +13,8 @@ from tensorflow.keras.initializers import VarianceScaling
 
 from smooth.datasets import ClassificationDataset
 
-# from tqdm.keras import TqdmCallback
 
-import matplotlib.pyplot as plt
+# from tqdm.keras import TqdmCallback
 
 
 def get_average_l2(model):
@@ -39,6 +38,20 @@ def get_roughness(model, x_input):
     # Should we perhaps take the norm of the entire 10x28x28 tensor?
     res = np.mean(np.linalg.norm(dy_dx, ord='fro', axis=(2, 3)))
     return res
+
+
+def get_metrics(model, dataset, max_roughness_samples=1000):
+    roughness = get_roughness(model, dataset.x_test[:max_roughness_samples])
+    l2 = get_average_l2(model)
+    history = model.history.history
+    return dict(
+        roughness=roughness,
+        l2=l2,
+        loss=history["loss"][-1],
+        accuracy=history["accuracy"][-1],
+        val_loss=history.get("val_loss", [None])[-1],
+        val_accuracy=history.get("val_accuracy", [None])[-1],
+    )
 
 
 class MetricsCallback(keras.callbacks.Callback):
@@ -90,18 +103,19 @@ def split_dataset(x, y, first_part=0.9):
 
 
 def get_model_id(**kwargs):
-    return "{}-{}".format(
-        "exp0211-1",
+    return "{}".format(
+        # "exp0211-1",
         # datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
         "_".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value)
                   for key, value in sorted(kwargs.items())))
     )
 
 
-LOG_DIR = "logs_mnist_dd/"
+LOG_DIR = "logs1/"
 
 
-def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size=200, epochs=1000, batch_size=512):
+def train(dataset: ClassificationDataset, learning_rate, init_scale, log_dir, hidden_size=200, epochs=1000,
+          batch_size=512):
     model = tf.keras.Sequential()
     model.add(keras.layers.Flatten(input_shape=dataset.x_train[0].shape))
     model.add(layers.Dense(hidden_size, activation='relu',
@@ -123,8 +137,10 @@ def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size
     #     history_callback = HistoryCallback(epochs_per_save=int(epochs/n_frames))
     metrics_cb = MetricsCallback(x_val, y_val)
 
-    # tqdm_cb = TqdmCallbackFixed(verbose=0)
-    validation_freq = 500
+    # How many times do we want to validate and call and the Tensorboard callback
+    n_updates = 100
+    validation_freq = int(epochs / n_updates)
+
     model.validation_freq = validation_freq
     model.id = get_model_id(
         learning_rate=learning_rate,
@@ -133,15 +149,28 @@ def train(dataset: ClassificationDataset, learning_rate, init_scale, hidden_size
         epochs=epochs,
         batch_size=batch_size,
     )
-    log_dir = os.path.join(LOG_DIR, model.id)
+
+    log_dir = os.path.join(log_dir, model.id)
+    # Warning: update_freq is in samples in TF 2.0.0, but in batches in TF 2.1
+    tb_update_freq = update_freq = int((len(dataset.x_train) * epochs) / n_updates)
+    # print("TB update freq:", tb_update_freq)
+
     tensorboard_callback = tf.keras.callbacks.TensorBoard(
         log_dir=log_dir,
         profile_batch=0,
         write_graph=False,
-        histogram_freq=100,
-        update_freq=int(1e5), # "batch"
+        histogram_freq=validation_freq,
+        update_freq=int(1e18),  # "batch"
     )
-    file_writer = tf.summary.create_file_writer(log_dir + "/train")
+    tensorboard_callback._on_epoch_end = tensorboard_callback.on_epoch_end
+
+    def tb_on_epoch_end(epoch, logs=None):
+        if logs is not None and "val_loss" in logs:
+            tensorboard_callback._on_epoch_end(epoch, logs)
+
+    tensorboard_callback.on_epoch_end = tb_on_epoch_end
+
+    file_writer = tf.summary.create_file_writer(os.path.join(log_dir, "train"))
     file_writer.set_as_default()
 
     # checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(LOG_DIR, model_id, "checkpoints"),

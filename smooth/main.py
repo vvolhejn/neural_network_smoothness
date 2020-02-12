@@ -31,12 +31,11 @@ def mnist_double_descent():
     for learning_rate in [0.01, 0.003, 0.001]:
         for hidden_size in range(100, 3100, 100):
             model = smooth.model.train(small_noisy_mnist, learning_rate=learning_rate, init_scale=1.,
-                                       hidden_size=hidden_size, epochs=20000, batch_size=2000)
+                                       hidden_size=hidden_size, epochs=20000, batch_size=1800)
             model.save(os.path.join(smooth.model.LOG_DIR, model.id, "model.h5"))
             print("Done with {}".format(model.id))
 
-
-def main():
+def init(gpu_indices):
     # I ran into this issue when using model.save():
     # https://community.paperspace.com/t/storage-and-h5py-pytables-e-g-keras-save-weights-issues-heres-why-and-how-to-solve-it/430
     # This should hopefully fix it.
@@ -45,6 +44,9 @@ def main():
     gpus = tf.config.experimental.list_physical_devices('GPU')
     if gpus:
         tf.config.experimental.set_visible_devices([gpus[2]], 'GPU')
+
+def main():
+    init(gpu_indices=[2])
 
     mnist_double_descent()
     # print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
