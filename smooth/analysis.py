@@ -12,7 +12,7 @@ def get_kendall_coefs(
 ):
     """
     Given a dataframe containing the hyperparameters and measures of trained models,
-    computes Kendall's tau coefficients between a metric to be predicted (result_col)
+    computes Kendall's tau coefficients between a measure to be predicted (result_col)
     and the measures used to predict it (measure_cols).
 
     Following "Fantastic Generalization Measures and Where to Find Them",

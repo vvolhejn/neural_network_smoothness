@@ -1,2 +1,2 @@
 #!/bin/bash
-PYTHONPATH=$PYTHONPATH:$(pwd) python3 smooth/mnist_double_descent.py
+PYTHONPATH=$PYTHONPATH:$(pwd) python3 smooth/train_models.py
