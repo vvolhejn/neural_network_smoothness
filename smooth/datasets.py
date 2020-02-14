@@ -21,8 +21,10 @@ class ClassificationDataset:
         assert n_samples <= len(self.x_train)
         n_samples_test = int(n_samples / len(self.x_train) * len(self.x_test))
         return ClassificationDataset(
-            x_train=self.x_train[:n_samples], y_train=self.y_train[:n_samples],
-            x_test=self.x_test[:n_samples_test], y_test=self.y_test[:n_samples_test]
+            x_train=self.x_train[:n_samples],
+            y_train=self.y_train[:n_samples],
+            x_test=self.x_test[:n_samples_test],
+            y_test=self.y_test[:n_samples_test],
         )
 
     def add_label_noise(self, p: float):
@@ -45,16 +47,26 @@ class ClassificationDataset:
             return np.where(mask, y_wrong, y)
 
         return ClassificationDataset(
-            x_train=self.x_train, y_train=add_label_noise_to_one(self.y_train),
-            x_test=self.x_test, y_test=self.y_test,
+            x_train=self.x_train,
+            y_train=add_label_noise_to_one(self.y_train),
+            x_test=self.x_test,
+            y_test=self.y_test,
         )
 
 
 def _get_mnist():
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-    x_train = x_train.astype(np.float32) / 255.
-    x_test = x_test.astype(np.float32) / 255.
+    x_train = x_train.astype(np.float32) / 255.0
+    x_test = x_test.astype(np.float32) / 255.0
     return ClassificationDataset(x_train, y_train, x_test, y_test)
 
 
 mnist = _get_mnist()
+
+
+def get_mnist_variant(n_samples, label_noise):
+    rng_state = np.random.get_state()
+    np.random.seed(8212)
+    mnist2 = mnist.subset(n_samples).add_label_noise(label_noise)
+    np.random.set_state(rng_state)
+    return mnist2
