@@ -8,3 +8,6 @@ venv/
 *.egg-info/
 __pycache__/
 *.pyc
+
+# Jupyter
+.ipynb_checkpoints/
