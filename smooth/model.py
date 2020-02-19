@@ -5,8 +5,6 @@ import datetime
 import numpy as np
 import tensorflow as tf
 
-assert tf.__version__[0] == "2"
-
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.initializers import VarianceScaling
@@ -14,55 +12,7 @@ from tensorflow.keras.initializers import VarianceScaling
 from smooth.datasets import ClassificationDataset
 from smooth import measures, callbacks
 
-
-def get_measures(
-    model: tf.keras.Model,
-    dataset: ClassificationDataset,
-    include_training_measures=True,
-    max_gradient_norm_samples=1000,
-):
-    gradient_norm = measures.gradient_norm(
-        model, dataset.x_test[:max_gradient_norm_samples]
-    )
-    l2 = measures.average_l2(model)
-
-    # seg_total_variation = 0
-    # seg_total_variation_derivative = 0
-    seg_total_variation = measures.segments_total_variation(
-        model,
-        dataset.x_test,
-        segments_per_batch=1000,
-    )
-    seg_total_variation_derivative = measures.segments_total_variation(
-        model, dataset.x_test, derivative=True,
-        segments_per_batch=50
-    )
-
-    tf_metrics = dict(zip(
-        model.metrics_names,
-        model.evaluate(dataset.x_test, dataset.y_test, batch_size=256, verbose=0),
-    ))
-
-    res = dict(
-        gradient_norm=gradient_norm,
-        l2=l2,
-        seg_total_variation=seg_total_variation,
-        seg_total_variation_derivative=seg_total_variation_derivative,
-        test_loss=tf_metrics["loss"],
-        test_accuracy=tf_metrics["accuracy"],
-    )
-
-    if include_training_measures:
-        history = model.history.history
-        res.update(
-            loss=history["loss"][-1],
-            accuracy=history["accuracy"][-1],
-            # val_loss=history.get("val_loss", [None])[-1],
-            # val_accuracy=history.get("val_accuracy", [None])[-1],
-            actual_epochs=len(history["loss"]),
-        )
-
-    return res
+assert tf.__version__[0] == "2"
 
 
 def split_dataset(x, y, first_part=0.9):
@@ -97,6 +47,7 @@ def train_shallow_relu(
     batch_size=512,
     iteration=None,
     verbose=0,
+    loss_threshold=0.01,
 ):
     model = tf.keras.Sequential()
     model.add(keras.layers.Flatten(input_shape=dataset.x_train[0].shape))
@@ -160,7 +111,7 @@ def train_shallow_relu(
             measures_cb,
             tf.keras.callbacks.EarlyStopping("loss", min_delta=1e-5, patience=500),
             tensorboard_callback,
-            callbacks.Stopping(0.01),
+            callbacks.Stopping(loss_threshold),
             # checkpoint_callback,
         ],
         validation_data=(x_val, y_val),

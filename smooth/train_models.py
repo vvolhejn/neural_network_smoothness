@@ -8,8 +8,6 @@ import sacred
 import numpy as np
 import pandas as pd
 
-import smooth.util
-
 DEBUG = False
 
 ex = sacred.Experiment("model_comparison")
@@ -28,9 +26,11 @@ def config():
     hidden_sizes = list(np.logspace(np.log10(50), np.log10(4000), 20).astype(int))
     epochs = 20000
     batch_sizes = [128, 256, 512]
-    processes = 8
+    processes = 18
     iterations = 3
     log_dir = "logs/"
+    dataset = "cifar10"
+    loss_threshold = 0.03
 
 
 class Hyperparams:
@@ -43,6 +43,8 @@ class Hyperparams:
         log_dir,
         iteration,
         init_scale,
+        dataset: str,
+        loss_threshold: float,
     ):
         self.learning_rate = learning_rate
         self.hidden_size = hidden_size
@@ -51,27 +53,36 @@ class Hyperparams:
         self.log_dir = log_dir
         self.iteration = iteration
         self.init_scale = init_scale
+        self.dataset = dataset
+        self.loss_threshold = loss_threshold
+
+
+def get_process_id():
+    process_id = multiprocessing.current_process()._identity
+    if process_id == ():
+        # This happens when we're not running inside of a multiprocessing.Pool
+        return 0
+    else:
+        return process_id[0]
 
 
 def train_model(hparams: Hyperparams, verbose: int = 0):
     import os
     import smooth.util
+
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # or any {'0', '1', '2'}
 
     # Hacky - we're relying on an undocumented internal variable
-    process_id = multiprocessing.current_process()._identity[0]
-    smooth.util.init(gpu_indices=[process_id % 3 + 1])
-    # init(gpu_indices=[2])
-
+    process_id = get_process_id()
+    smooth.util.tensorflow_init(gpu_indices=[process_id % 3 + 1])
 
     import smooth.model
     import smooth.datasets
 
-    mnist = smooth.datasets.get_mnist()
+    dataset = smooth.datasets.get_keras_image_dataset(hparams.dataset)
 
-    # print("Training model", vars(hparams))
     model = smooth.model.train_shallow_relu(
-        mnist,
+        dataset,
         learning_rate=hparams.learning_rate,
         init_scale=hparams.init_scale,
         hidden_size=hparams.hidden_size,
@@ -80,14 +91,17 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
         log_dir=hparams.log_dir,
         iteration=hparams.iteration,
         verbose=verbose,
+        loss_threshold=hparams.loss_threshold,
     )
     model.save(os.path.join(model.log_dir, "model.h5"))
     res = vars(hparams).copy()
     res["log_dir"] = model.log_dir
-    measures = smooth.model.get_measures(model, mnist)
+    measures = smooth.measures.get_measures(
+        model, dataset.x_test, dataset.y_test, samples=1000
+    )
     res.update(measures)
-    print("Done with", vars(hparams))
-    print("    ", res)
+    # print("Done with", vars(hparams))
+    print("Finished model training:", res)
     return res
 
 
@@ -102,6 +116,8 @@ def main(
     processes,
     iterations,
     log_dir,
+    dataset,
+    loss_threshold,
 ):
     if DEBUG:
         log_dir = "logs_debug/"
@@ -116,6 +132,8 @@ def main(
             [log_dir],
             range(iterations),
             init_scales,
+            [dataset],
+            [loss_threshold],
         )
     )
     hyperparams_to_try = [Hyperparams(*l) for l in hyperparam_combinations]

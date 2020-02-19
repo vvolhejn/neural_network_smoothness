@@ -54,15 +54,19 @@ class ClassificationDataset:
         )
 
 
-def _get_keras_image_dataset(module):
-    (x_train, y_train), (x_test, y_test) = module.load_data()
+def get_keras_image_dataset(name: str):
+    load_f = {
+        "mnist": tf.keras.datasets.mnist.load_data,
+        "cifar10": tf.keras.datasets.cifar10.load_data
+    }[name.lower()]
+    (x_train, y_train), (x_test, y_test) = load_f()
     x_train = x_train.astype(np.float32) / 255.0
     x_test = x_test.astype(np.float32) / 255.0
     return ClassificationDataset(x_train, y_train, x_test, y_test)
 
 
 def get_cifar10():
-    return _get_keras_image_dataset(tf.keras.datasets.cifar10)
+    return get_keras_image_dataset("cifar10")
     # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
     # x_train = x_train.astype(np.float32) / 255.0
     # x_test = x_test.astype(np.float32) / 255.0
@@ -70,7 +74,7 @@ def get_cifar10():
 
 
 def get_mnist():
-    return _get_keras_image_dataset(tf.keras.datasets.mnist)
+    return get_keras_image_dataset("mnist")
     # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
     # x_train = x_train.astype(np.float32) / 255.0
     # x_test = x_test.astype(np.float32) / 255.0

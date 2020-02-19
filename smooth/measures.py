@@ -1,7 +1,54 @@
 from typing import Callable
+from math import ceil
 
 import tensorflow as tf
 import numpy as np
+
+
+def get_measures(
+    model: tf.keras.Model,
+    x: np.ndarray,
+    y: np.ndarray,
+    # dataset: ClassificationDataset,
+    include_training_measures=True,
+    samples=1000,
+):
+    grad_norm = gradient_norm(model, x[:samples])
+    l2 = average_l2(model)
+
+    # seg_total_variation = 0
+    # seg_total_variation_derivative = 0
+    seg_total_variation = segments_total_variation(
+        model, x, segments_per_batch=100, segments=samples,
+    )
+    seg_total_variation_derivative = segments_total_variation(
+        model, x, derivative=True, segments_per_batch=10, segments=samples,
+    )
+
+    tf_metrics = dict(
+        zip(model.metrics_names, model.evaluate(x, y, batch_size=256, verbose=0), )
+    )
+
+    res = dict(
+        gradient_norm=grad_norm,
+        l2=l2,
+        seg_total_variation=seg_total_variation,
+        seg_total_variation_derivative=seg_total_variation_derivative,
+        test_loss=tf_metrics["loss"],
+        test_accuracy=tf_metrics["accuracy"],
+    )
+
+    if include_training_measures:
+        history = model.history.history
+        res.update(
+            loss=history["loss"][-1],
+            accuracy=history["accuracy"][-1],
+            # val_loss=history.get("val_loss", [None])[-1],
+            # val_accuracy=history.get("val_accuracy", [None])[-1],
+            actual_epochs=len(history["loss"]),
+        )
+
+    return res
 
 
 def average_l2(model: tf.keras.Model):
@@ -70,7 +117,7 @@ def _interpolate(a, b, n_samples):
     """
     a, b = np.array(a), np.array(b)
     assert a.shape == b.shape
-    w = np.linspace(0, 1, n_samples)
+    w = np.linspace(0, 1, n_samples, dtype=np.float32)
     res = np.outer(1 - w, a) + np.outer(w, b)
     res = np.reshape(res, (-1,) + a.shape)
     return res
@@ -132,7 +179,7 @@ def segments_total_variation(
     x = np.array([x[:segments], x[segments:]])
     x = np.swapaxes(x, 0, 1)
 
-    batches = np.array_split(x, segments // segments_per_batch)
+    batches = np.array_split(x, ceil(segments / segments_per_batch))
 
     results = []
     for batch in batches:
@@ -142,13 +189,3 @@ def segments_total_variation(
         results.append(cur)
 
     return np.mean(results)
-
-    #
-    # res = 0
-    # for i in range(n_segments):
-    #     x1, x2 = x_input[np.random.randint(len(x_input), size=(2,))]
-    #     res += _segment_total_variation(
-    #         model, [x1], [x2], n_samples_per_segment, derivative
-    #     )
-    #
-    # return res / n_segments

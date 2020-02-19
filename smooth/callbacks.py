@@ -3,9 +3,11 @@ import logging
 import tensorflow as tf
 from tensorflow import keras
 
-from smooth import measures
+import smooth.measures
+
 
 # from tqdm.keras import TqdmCallback
+
 
 class Stopping(keras.callbacks.Callback):
     def __init__(self, loss_threshold):
@@ -25,7 +27,6 @@ class Stopping(keras.callbacks.Callback):
             logging.warning(
                 "Early stopping conditioned on measure `%s` "
                 "which is not available. Available measures are: %s",
-                self.monitor,
                 ",".join(list(logs.keys())),
             )
         return monitor_value
@@ -36,24 +37,32 @@ class Measures(keras.callbacks.Callback):
         super().__init__()
         self.x_val = x_val
         self.y_val = y_val
-        self.max_gradient_norm_samples = 1000
+        self.samples = 100
 
     def on_test_end(self, logs={}):
+        measure_names = [
+            "gradient_norm",
+            "l2",
+            "seg_total_variation",
+            "seg_total_variation_derivative",
+        ]
         history = self.model.history.history
+        step = len(history["loss"]) + 1
 
-        for k in ["gradient_norm", "l2"]:
+        measures = smooth.measures.get_measures(
+            self.model,
+            self.x_val,
+            self.y_val,
+            include_training_measures=False,
+            samples=self.samples,
+        )
+
+        for k in measure_names:
             if k not in history:
                 history[k] = []
 
-        gradient_norm = measures.gradient_norm(
-            self.model, self.x_val[: self.max_gradient_norm_samples]
-        )
-        l2 = measures.average_l2(self.model)
-        history["gradient_norm"].append(gradient_norm)
-        history["l2"].append(l2)
-        step = len(history["loss"]) + 1
-        tf.summary.scalar("gradient_norm", data=gradient_norm, step=step)
-        tf.summary.scalar("l2", data=l2, step=step)
+            history[k].append(measures[k])
+            tf.summary.scalar(k, data=measures[k], step=step)
 
 
 class TensorBoard(keras.callbacks.TensorBoard):
@@ -74,6 +83,7 @@ class TensorBoard(keras.callbacks.TensorBoard):
     def on_epoch_end(self, epoch, logs={}):
         if logs is not None and "val_loss" in logs:
             super().on_epoch_end(epoch, logs)
+
 
 # class Tqdm(TqdmCallback):
 #
