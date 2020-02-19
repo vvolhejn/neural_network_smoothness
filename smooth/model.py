@@ -15,22 +15,54 @@ from smooth.datasets import ClassificationDataset
 from smooth import measures, callbacks
 
 
-def get_measures(model, dataset, max_gradient_norm_samples=1000):
+def get_measures(
+    model: tf.keras.Model,
+    dataset: ClassificationDataset,
+    include_training_measures=True,
+    max_gradient_norm_samples=1000,
+):
     gradient_norm = measures.gradient_norm(
         model, dataset.x_test[:max_gradient_norm_samples]
     )
     l2 = measures.average_l2(model)
-    history = model.history.history
 
-    return dict(
+    # seg_total_variation = 0
+    # seg_total_variation_derivative = 0
+    seg_total_variation = measures.segments_total_variation(
+        model,
+        dataset.x_test,
+        segments_per_batch=1000,
+    )
+    seg_total_variation_derivative = measures.segments_total_variation(
+        model, dataset.x_test, derivative=True,
+        segments_per_batch=50
+    )
+
+    tf_metrics = dict(zip(
+        model.metrics_names,
+        model.evaluate(dataset.x_test, dataset.y_test, batch_size=256, verbose=0),
+    ))
+
+    res = dict(
         gradient_norm=gradient_norm,
         l2=l2,
-        loss=history["loss"][-1],
-        accuracy=history["accuracy"][-1],
-        val_loss=history.get("val_loss", [None])[-1],
-        val_accuracy=history.get("val_accuracy", [None])[-1],
-        actual_epochs=len(history["loss"]),
+        seg_total_variation=seg_total_variation,
+        seg_total_variation_derivative=seg_total_variation_derivative,
+        test_loss=tf_metrics["loss"],
+        test_accuracy=tf_metrics["accuracy"],
     )
+
+    if include_training_measures:
+        history = model.history.history
+        res.update(
+            loss=history["loss"][-1],
+            accuracy=history["accuracy"][-1],
+            # val_loss=history.get("val_loss", [None])[-1],
+            # val_accuracy=history.get("val_accuracy", [None])[-1],
+            actual_epochs=len(history["loss"]),
+        )
+
+    return res
 
 
 def split_dataset(x, y, first_part=0.9):
@@ -55,7 +87,7 @@ def get_model_id(**kwargs):
     )
 
 
-def train(
+def train_shallow_relu(
     dataset: ClassificationDataset,
     learning_rate,
     init_scale,

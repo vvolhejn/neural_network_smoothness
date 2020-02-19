@@ -8,6 +8,8 @@ import sacred
 import numpy as np
 import pandas as pd
 
+import smooth.util
+
 DEBUG = False
 
 ex = sacred.Experiment("model_comparison")
@@ -51,42 +53,24 @@ class Hyperparams:
         self.init_scale = init_scale
 
 
-def init(gpu_indices):
-    import tensorflow as tf
-
-    # I ran into this issue when using model.save():
-    # https://community.paperspace.com/t/storage-and-h5py-pytables-e-g-keras-save-weights-issues-heres-why-and-how-to-solve-it/430
-    # This should hopefully fix it.
-    os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-
-    gpus = tf.config.experimental.list_physical_devices("GPU")
-    if gpus:
-        # Only allocates GPU memory that is necessary. Makes it easier to run multiple
-        # training jobs simultaneously
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-
-        tf.config.experimental.set_visible_devices(
-            [gpus[i] for i in gpu_indices], "GPU"
-        )
-
-
 def train_model(hparams: Hyperparams, verbose: int = 0):
     import os
+    import smooth.util
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # or any {'0', '1', '2'}
 
+    # Hacky - we're relying on an undocumented internal variable
     process_id = multiprocessing.current_process()._identity[0]
-    # print("Process id:", process_id)
-    init(gpu_indices=[process_id % 3 + 1])
+    smooth.util.init(gpu_indices=[process_id % 3 + 1])
     # init(gpu_indices=[2])
 
-    from smooth.datasets import mnist
-    import smooth.model
 
-    mnist = smooth.datasets.mnist
+    import smooth.model
+    import smooth.datasets
+
+    mnist = smooth.datasets.get_mnist()
 
     # print("Training model", vars(hparams))
-    model = smooth.model.train(
+    model = smooth.model.train_shallow_relu(
         mnist,
         learning_rate=hparams.learning_rate,
         init_scale=hparams.init_scale,

@@ -27,25 +27,36 @@ def gradient_norm(model: tf.keras.Model, x_input):
     return res
 
 
-def _total_variation(samples):
+def _total_variation(samples, batch=False):
     """
     Given evenly spaced samples of a function's values, computes an approximation
     of the total variation, that is the sum of the distances of consecutive samples.
-
     For scalar samples, this means the sum of absolute values of the first difference,
     for vector-valued functions we sum the l2 norms of the first difference.
+
+    If `batch` is set, we interpret the first axis as the batch axis
+    and treat batches separately.
 
     >>> _total_variation([1, 2, 3, 1])
     4.0
     >>> print("{:.3f}".format(_total_variation([[0, 0], [1, 1], [1, 2]])))
     2.414
+    >>> _total_variation([[0, 0], [1, 1], [1, 2]], batch=True)
+    array([0., 0., 1.])
     """
-    res = np.diff(samples, axis=0)
-    if res.ndim == 1:
-        res = res[:, np.newaxis]
-    res = np.linalg.norm(res, axis=1)
-    res = np.sum(res)
-    return res
+    if not batch:
+        samples = np.array([samples])
+    res = np.diff(samples, axis=1)
+    if res.ndim == 2:
+        res = res[:, :, np.newaxis]
+    res = np.linalg.norm(res, axis=2)
+    res = np.sum(res, axis=1)
+
+    if not batch:
+        assert len(res) == 1
+        return res[0]
+    else:
+        return res
 
 
 def _interpolate(a, b, n_samples):
@@ -65,21 +76,51 @@ def _interpolate(a, b, n_samples):
     return res
 
 
-def _segment_total_variation(model: tf.keras.Model, x1, x2, n_samples, derivative):
+def _segment_total_variation(
+    model: tf.keras.Model, x1, x2, n_samples: int, derivative: bool, batch=False
+):
+    if not batch:
+        x1 = [x1]
+        x2 = [x2]
+    x1 = np.array(x1)
+    x2 = np.array(x2)
+    n_segments = len(x1)
+    assert x1.shape == x2.shape
     samples = _interpolate(x1, x2, n_samples)
+    samples_flat = np.reshape(samples, (n_samples * n_segments,) + samples.shape[2:])
+
     if not derivative:
-        output = model.predict(samples)
+        output_flat = model.predict(samples_flat, batch_size=1024)
     else:
         with tf.GradientTape() as g:
-            x = tf.constant(samples)
+            x = tf.constant(samples_flat)
             g.watch(x)
             y = model(x)
-        dy_dx = g.batch_jacobian(y, x)
-    return _total_variation(output)
+        output_flat = g.batch_jacobian(y, x)
+        # We just stretch the Jacobian into a single vector and take its total variation
+        # (meaning we sum the Frobenius norms of the first difference)
+        # Does this make any sense mathematically?
+        output_flat = np.reshape(output_flat, (len(samples_flat), -1))
+
+    output = np.reshape(output_flat, (n_samples, n_segments) + output_flat.shape[1:])
+    output = np.swapaxes(output, 0, 1)
+    # at this point, `output` has shape (n_segments, n_samples, n_classes)
+    res = _total_variation(output, batch=True)
+
+    if not batch:
+        assert len(res) == 1
+        return res[0]
+    else:
+        return res
 
 
 def segments_total_variation(
-    model: tf.keras.Model, x_input, n_segments=1000, n_samples_per_segment=100, derivative=False,
+    model: tf.keras.Model,
+    x_input,
+    segments=1000,
+    samples_per_segment=100,
+    segments_per_batch=10,
+    derivative=False,
 ):
     """
     Takes two random points from `x_input` and calculates the total variation
@@ -87,26 +128,27 @@ def segments_total_variation(
     This is repeated `n_segments` times and the average total variation is taken.
     """
 
-    res = 0
-    for i in range(n_segments):
-        x1, x2 = x_input[np.random.randint(len(x_input), size=(2,))]
-        res += _segment_total_variation(x1, x2, n_samples_per_segment, derivative)
+    x = x_input[np.random.randint(len(x_input), size=(2 * segments,))]
+    x = np.array([x[:segments], x[segments:]])
+    x = np.swapaxes(x, 0, 1)
 
-    return res / n_segments
+    batches = np.array_split(x, segments // segments_per_batch)
 
-    # Attempted vectorized version:
-    # sample_is = np.random.randint(len(x_input), size=n_segments * 2)
-    # endpoints = np.reshape(x_input[sample_is], (n_segments, 2, -1))
+    results = []
+    for batch in batches:
+        x1, x2 = np.swapaxes(batch, 0, 1)
+        cur = _segment_total_variation(model, x1, x2, samples_per_segment, derivative,
+                                       batch=True)
+        results.append(cur)
+
+    return np.mean(results)
+
     #
-    # segments = _interpolate(endpoints[:,0], endpoints[:,1], n_samples_per_segment)
-    # print(segments.shape)
-    # segments_flat = np.ravel(segments)
-    # y = model.predict(segments_flat)
-    # y = np.reshape(y, segments.shape)
-    # print(y.shape)
     # res = 0
     # for i in range(n_segments):
-    #     res += _total_variation(y[:,i])
-    #     print(y[:,i], _total_variation(y[:,i]))
+    #     x1, x2 = x_input[np.random.randint(len(x_input), size=(2,))]
+    #     res += _segment_total_variation(
+    #         model, [x1], [x2], n_samples_per_segment, derivative
+    #     )
     #
     # return res / n_segments

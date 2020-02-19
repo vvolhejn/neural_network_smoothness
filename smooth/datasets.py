@@ -54,19 +54,32 @@ class ClassificationDataset:
         )
 
 
-def _get_mnist():
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+def _get_keras_image_dataset(module):
+    (x_train, y_train), (x_test, y_test) = module.load_data()
     x_train = x_train.astype(np.float32) / 255.0
     x_test = x_test.astype(np.float32) / 255.0
     return ClassificationDataset(x_train, y_train, x_test, y_test)
 
 
-mnist = _get_mnist()
+def get_cifar10():
+    return _get_keras_image_dataset(tf.keras.datasets.cifar10)
+    # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+    # x_train = x_train.astype(np.float32) / 255.0
+    # x_test = x_test.astype(np.float32) / 255.0
+    # return ClassificationDataset(x_train, y_train, x_test, y_test)
+
+
+def get_mnist():
+    return _get_keras_image_dataset(tf.keras.datasets.mnist)
+    # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    # x_train = x_train.astype(np.float32) / 255.0
+    # x_test = x_test.astype(np.float32) / 255.0
+    # return ClassificationDataset(x_train, y_train, x_test, y_test)
 
 
 def get_mnist_variant(n_samples, label_noise):
     rng_state = np.random.get_state()
     np.random.seed(8212)
-    mnist2 = mnist.subset(n_samples).add_label_noise(label_noise)
+    mnist2 = get_mnist().subset(n_samples).add_label_noise(label_noise)
     np.random.set_state(rng_state)
     return mnist2
