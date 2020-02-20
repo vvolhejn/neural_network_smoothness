@@ -9,5 +9,5 @@ setup(
         "console_scripts": [
             "smooth=smooth.main:main",
         ]
-    }, install_requires=['tensorflow', 'numpy', 'pandas', 'scipy', 'sacred']
+    }, install_requires=['tensorflow', 'numpy', 'pandas', 'scipy', 'sacred', 'tqdm']
 )

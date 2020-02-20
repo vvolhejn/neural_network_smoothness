@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 
-class ClassificationDataset:
+class Dataset:
     def __init__(self, x_train, y_train, x_test, y_test):
         self.x_train = x_train
         self.x_test = x_test
@@ -26,6 +26,14 @@ class ClassificationDataset:
             x_test=self.x_test[:n_samples_test],
             y_test=self.y_test[:n_samples_test],
         )
+
+
+class ClassificationDataset(Dataset):
+    def __init__(self, x_train, y_train, x_test, y_test):
+        super().__init__(x_train, y_train, x_test, y_test)
+        assert np.min(y_train) >= 0
+        assert np.min(y_test) >= 0
+        self.n_classes = np.max(y_train) + 1
 
     def add_label_noise(self, p: float):
         """

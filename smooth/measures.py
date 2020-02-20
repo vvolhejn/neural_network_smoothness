@@ -12,37 +12,57 @@ def get_measures(
     # dataset: ClassificationDataset,
     include_training_measures=True,
     samples=1000,
+    # If set, instead of sampling segments use one segment spanning the entire domain
+    precise_in_1d=True,
 ):
     grad_norm = gradient_norm(model, x[:samples])
     l2 = average_l2(model)
 
-    # seg_total_variation = 0
-    # seg_total_variation_derivative = 0
-    seg_total_variation = segments_total_variation(
-        model, x, segments_per_batch=100, segments=samples,
-    )
-    seg_total_variation_derivative = segments_total_variation(
-        model, x, derivative=True, segments_per_batch=10, segments=samples,
-    )
-
-    tf_metrics = dict(
-        zip(model.metrics_names, model.evaluate(x, y, batch_size=256, verbose=0), )
-    )
+    if x[0].squeeze().shape == () and y[0].squeeze().shape == () and precise_in_1d:
+        seg_total_variation = _segment_total_variation(
+            model,
+            np.min(x, axis=0),
+            np.max(x, axis=0),
+            n_samples=samples,
+            derivative=False,
+        )
+        seg_total_variation_derivative = _segment_total_variation(
+            model,
+            np.min(x, axis=0),
+            np.max(x, axis=0),
+            n_samples=samples,
+            derivative=True,
+        )
+    else:
+        seg_total_variation = segments_total_variation(
+            model, x, segments_per_batch=100, segments=samples,
+        )
+        seg_total_variation_derivative = segments_total_variation(
+            model, x, derivative=True, segments_per_batch=10, segments=samples,
+        )
 
     res = dict(
         gradient_norm=grad_norm,
         l2=l2,
         seg_total_variation=seg_total_variation,
         seg_total_variation_derivative=seg_total_variation_derivative,
-        test_loss=tf_metrics["loss"],
-        test_accuracy=tf_metrics["accuracy"],
     )
+
+    # For metrics recorded by keras itself, such as loss, accuracy/mae
+    tf_metrics = dict(
+        zip(model.metrics_names, model.evaluate(x, y, batch_size=256, verbose=0),)
+    )
+    for k, v in tf_metrics.items():
+        res["test_{}".format(k)] = v
 
     if include_training_measures:
         history = model.history.history
+        for k in model.metrics_names:
+            res["train_{}".format(k)] = history[k][-1]
+
         res.update(
-            loss=history["loss"][-1],
-            accuracy=history["accuracy"][-1],
+            # loss=history["loss"][-1],
+            # accuracy=history["accuracy"][-1],
             # val_loss=history.get("val_loss", [None])[-1],
             # val_accuracy=history.get("val_accuracy", [None])[-1],
             actual_epochs=len(history["loss"]),
@@ -67,10 +87,11 @@ def gradient_norm(model: tf.keras.Model, x_input):
         g.watch(x)
         y = model(x)
     dy_dx = g.batch_jacobian(y, x)
-    # We consider each function x -> prob. that x is a "1" separately,
-    # take the Frobenius norms of the Jacobians and sum them
+    # For MNIST, we consider each function x -> prob. that x is a "1" separately,
+    # take the Frobenius norms of the Jacobians and take the mean
     # Should we perhaps take the norm of the entire 10x28x28 tensor?
-    res = np.mean(np.linalg.norm(dy_dx, ord="fro", axis=(2, 3)))
+    axes_to_sum = tuple(range(2, len(dy_dx.shape)))
+    res = np.mean(np.linalg.norm(dy_dx, axis=axes_to_sum))
     return res
 
 
@@ -184,8 +205,9 @@ def segments_total_variation(
     results = []
     for batch in batches:
         x1, x2 = np.swapaxes(batch, 0, 1)
-        cur = _segment_total_variation(model, x1, x2, samples_per_segment, derivative,
-                                       batch=True)
+        cur = _segment_total_variation(
+            model, x1, x2, samples_per_segment, derivative, batch=True
+        )
         results.append(cur)
 
     return np.mean(results)

@@ -82,7 +82,7 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
     dataset = smooth.datasets.get_keras_image_dataset(hparams.dataset)
 
     model = smooth.model.train_shallow_relu(
-        dataset,
+        dataset=dataset,
         learning_rate=hparams.learning_rate,
         init_scale=hparams.init_scale,
         hidden_size=hparams.hidden_size,

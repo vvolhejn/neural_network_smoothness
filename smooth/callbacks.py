@@ -5,8 +5,7 @@ from tensorflow import keras
 
 import smooth.measures
 
-
-# from tqdm.keras import TqdmCallback
+from tqdm.keras import TqdmCallback
 
 
 class Stopping(keras.callbacks.Callback):
@@ -72,6 +71,7 @@ class TensorBoard(keras.callbacks.TensorBoard):
     """
 
     def __init__(self, log_dir, validation_freq):
+        # Warning: update_freq is in samples in TF 2.0.0, but in batches in TF 2.1
         super().__init__(
             log_dir=log_dir,
             profile_batch=0,
@@ -85,10 +85,10 @@ class TensorBoard(keras.callbacks.TensorBoard):
             super().on_epoch_end(epoch, logs)
 
 
-# class Tqdm(TqdmCallback):
-#
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
+class Tqdm(TqdmCallback):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 #         self.on_train_batch_begin = self.on_batch_begin
 #         self.on_train_batch_end = self.on_batch_end
 #         setattr(self, 'on_test_begin', lambda x: None)
