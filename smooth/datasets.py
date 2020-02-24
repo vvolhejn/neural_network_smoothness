@@ -1,16 +1,27 @@
 import numpy as np
 import tensorflow as tf
+import GPy
+import matplotlib.pyplot as plt
+
+import smooth.util
 
 
 class Dataset:
-    def __init__(self, x_train, y_train, x_test, y_test):
+    def __init__(self, x_train, y_train, x_test, y_test, name=None):
+        # Here we cast integers to floats as well, which maybe we should avoid.
+        x_train, y_train, x_test, y_test = [
+            np.array(arr).astype(dtype=np.float32)
+            for arr in [x_train, y_train, x_test, y_test]
+        ]
         self.x_train = x_train
         self.x_test = x_test
         self.y_train = y_train
         self.y_test = y_test
-        assert np.min(y_train) >= 0
-        # assert y_train.dtype == int
-        self.n_classes = np.max(y_train) + 1
+        self.name = name
+        assert x_train.shape[0] == y_train.shape[0]
+        assert x_test.shape[0] == y_test.shape[0]
+        assert x_train.shape[1:] == x_test.shape[1:]
+        assert y_train.shape[1:] == y_test.shape[1:]
 
     def subset(self, n_samples: int):
         """
@@ -29,8 +40,8 @@ class Dataset:
 
 
 class ClassificationDataset(Dataset):
-    def __init__(self, x_train, y_train, x_test, y_test):
-        super().__init__(x_train, y_train, x_test, y_test)
+    def __init__(self, x_train, y_train, x_test, y_test, name=None):
+        super().__init__(x_train, y_train, x_test, y_test, name)
         assert np.min(y_train) >= 0
         assert np.min(y_test) >= 0
         self.n_classes = np.max(y_train) + 1
@@ -65,12 +76,12 @@ class ClassificationDataset(Dataset):
 def get_keras_image_dataset(name: str):
     load_f = {
         "mnist": tf.keras.datasets.mnist.load_data,
-        "cifar10": tf.keras.datasets.cifar10.load_data
+        "cifar10": tf.keras.datasets.cifar10.load_data,
     }[name.lower()]
     (x_train, y_train), (x_test, y_test) = load_f()
     x_train = x_train.astype(np.float32) / 255.0
     x_test = x_test.astype(np.float32) / 255.0
-    return ClassificationDataset(x_train, y_train, x_test, y_test)
+    return ClassificationDataset(x_train, y_train, x_test, y_test, name=name)
 
 
 def get_cifar10():
@@ -95,3 +106,67 @@ def get_mnist_variant(n_samples, label_noise):
     mnist2 = get_mnist().subset(n_samples).add_label_noise(label_noise)
     np.random.set_state(rng_state)
     return mnist2
+
+
+class GaussianProcessDataset(Dataset):
+    def __init__(
+        self,
+        samples_train: int,
+        lengthscale: float,
+        seed=None,
+        # noise_var=0.01,
+        plot=False,
+    ):
+        self.samples_train = samples_train
+        self.lengthscale = lengthscale
+        if seed is None:
+            # For our purposes, one of 1e4 seeds is enough.
+            seed = np.random.randint(int(1e4))
+        self.seed = seed
+        noise_var = 0.001
+        x_min, x_max = -1, 1
+        samples_test = int(50 / lengthscale)
+
+        model = GPy.models.GPRegression(
+            # It seems the constructor needs at least 1 data point.
+            np.array([[(x_min + x_max) / 2]]),
+            np.array([[0]]),
+            noise_var=noise_var,
+        )
+        model.kern.lengthscale = lengthscale
+        # 0.1 * (x_max - x_min)
+        self.model = model
+
+        with smooth.util.NumpyRandomSeed(seed):
+            # We want the seed to identify the function, so start by sampling
+            # a ground truth function before sampling the training and test sets
+            true_samples = int(50 / lengthscale)
+            x_true = np.linspace(x_min, x_max, true_samples).reshape(-1, 1)
+            y_true = model.posterior_samples_f(x_true, full_cov=True, size=1)[:, :, 0]
+            model.set_XY(x_true, y_true)
+
+            x_train = np.linspace(x_min, x_max, samples_train).reshape(-1, 1)
+            y_train = model.posterior_samples_f(x_train, full_cov=True, size=1)[:, :, 0]
+            x_test = np.linspace(x_min, x_max, samples_test).reshape(-1, 1)
+            y_test = model.posterior_samples_f(x_test, full_cov=True, size=1)[:, :, 0]
+
+        if plot:
+            plt.plot(x_test, y_test)
+            plt.scatter(x_train, y_train, color="g")
+            model.plot(plot_limits=(x_min, x_max), levels=2)
+
+        super().__init__(x_train, y_train, x_test, y_test, name=self.get_name())
+
+    def get_name(self):
+        return "gp-{}-{}-{}".format(self.seed, self.lengthscale, self.samples_train)
+
+    @staticmethod
+    def from_name(name):
+        parts = name.split("-")
+        gp, seed, lengthscale, samples_train = parts
+        assert gp == "gp"
+        return GaussianProcessDataset(
+            seed=int(seed),
+            lengthscale=float(lengthscale),
+            samples_train=int(samples_train),
+        )

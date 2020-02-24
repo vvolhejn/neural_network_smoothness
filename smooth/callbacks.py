@@ -1,14 +1,13 @@
 import logging
+import copy
 
 import tensorflow as tf
-from tensorflow import keras
-
 import smooth.measures
 
 from tqdm.keras import TqdmCallback
 
 
-class Stopping(keras.callbacks.Callback):
+class Stopping(tf.keras.callbacks.Callback):
     def __init__(self, loss_threshold):
         self.loss_threshold = loss_threshold
         self.monitor = "loss"
@@ -31,7 +30,7 @@ class Stopping(keras.callbacks.Callback):
         return monitor_value
 
 
-class Measures(keras.callbacks.Callback):
+class Measures(tf.keras.callbacks.Callback):
     def __init__(self, x_val, y_val):
         super().__init__()
         self.x_val = x_val
@@ -64,7 +63,7 @@ class Measures(keras.callbacks.Callback):
             tf.summary.scalar(k, data=measures[k], step=step)
 
 
-class TensorBoard(keras.callbacks.TensorBoard):
+class TensorBoard(tf.keras.callbacks.TensorBoard):
     """
     A variant of the tensorboard callback which only logs data during validation.
     This is to prevent the storing of unnecessary amounts of data, which slows TB down.
@@ -86,12 +85,39 @@ class TensorBoard(keras.callbacks.TensorBoard):
 
 
 class Tqdm(TqdmCallback):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+
 #         self.on_train_batch_begin = self.on_batch_begin
 #         self.on_train_batch_end = self.on_batch_end
 #         setattr(self, 'on_test_begin', lambda x: None)
 #         setattr(self, 'on_test_end', lambda x: None)
 #         setattr(self, 'on_test_batch_begin', lambda x, y: None)
 #         setattr(self, 'on_test_batch_end', lambda x, y: None)
+
+
+class WeightsHistoryCallback(tf.keras.callbacks.Callback):
+    """
+    Periodically save the model's weights. Dynamically alters the saving frequency
+    so that the number of snapshots is in [min_snapshots, 2*min_snapshots).
+    """
+
+    def __init__(self, min_snapshots=50):
+        self.weights_history = {}
+        self.epochs_per_save = 1
+        self.min_snapshots = min_snapshots
+
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch % self.epochs_per_save == 0:
+            self.weights_history[epoch] = copy.deepcopy(self.model.get_weights())
+
+        if len(self.weights_history) >= 2 * self.min_snapshots:
+            self.epochs_per_save *= 2
+            self.weights_history = {
+                epoch: weights
+                for epoch, weights in self.weights_history.items()
+                if epoch % self.epochs_per_save == 0
+            }
+            assert len(self.weights_history) == self.min_snapshots
+            print(sorted(self.weights_history.keys())[:5])

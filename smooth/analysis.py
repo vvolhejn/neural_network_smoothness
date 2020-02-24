@@ -10,7 +10,7 @@ import matplotlib.animation
 import pandas as pd
 import scipy.stats
 
-import smooth
+import smooth.datasets
 
 
 def get_kendall_coefs(
@@ -61,7 +61,7 @@ def pad_bounds(mn, mx, coef):
     return (mn - width * coef, mx + width * coef)
 
 
-def plot_shallow_relu(
+def plot_shallow(
     model: tf.keras.Sequential,
     dataset: smooth.datasets.Dataset,
     epochs=None,
@@ -69,7 +69,9 @@ def plot_shallow_relu(
     title=None,
 ):
     """
-    Plots a model trained by `smooth.model.train_shallow_relu`.
+    Plots a model trained by `smooth.model.train_shallow`. Mainly intended for ReLU
+    models (else "kinks" are not really kinks), but applicable to other activations
+    as well.
 
     :param model:
     :param dataset:
@@ -79,8 +81,8 @@ def plot_shallow_relu(
     :param title:
     :return:
     """
-    xlim = pad_bounds(dataset.x_train.min(), dataset.x_train.max(), 0.5)
-    ylim = pad_bounds(dataset.y_train.min(), dataset.y_train.max(), 1)
+    xlim = pad_bounds(dataset.x_train.min(), dataset.x_train.max(), 0.25)
+    ylim = pad_bounds(dataset.y_train.min(), dataset.y_train.max(), 0.5)
     x = np.linspace(xlim[0], xlim[1], 101)
 
     ax, ax_hist = None, None  # type: plt.Axes
@@ -96,7 +98,7 @@ def plot_shallow_relu(
     elif hasattr(model, "plot_title"):
         ax.set_title(model.plot_title)
 
-    ax.scatter(dataset.x_train, dataset.y_train, marker="o", color="green")
+    ax.scatter(dataset.x_train, dataset.y_train, marker="o", color="green", alpha=0.5)
     (prediction_line,) = ax.plot([], [])
     (kinks_plot,) = ax.plot(
         [],
@@ -104,7 +106,7 @@ def plot_shallow_relu(
         marker="x",
         color="red",
         linestyle="None",
-        alpha=(1.0 / np.size(model.get_weights()[0])) ** 0.5
+        alpha=(1.0 / np.size(model.get_weights()[0])) ** 0.5,
     )
     epoch_text = ax.text(0.01, 0.95, "", transform=ax.transAxes)
 
@@ -155,3 +157,50 @@ def plot_shallow_relu(
         )
         plt.close()
         return animation
+
+
+def remove_constant_columns(df: pd.DataFrame, verbose=False):
+    """
+    Removes those columns of a DataFrame which are equal across all rows.
+    The DF is modified in-place and also returned.
+    """
+    removed = []
+    for col in df.columns:
+        if df[col].nunique(dropna=False) == 1:
+            removed.append(col)
+            del df[col]
+
+    if verbose:
+        print("Removed columns:", ", ".join(removed))
+
+    return df
+
+
+def expand_dataset_columns(df: pd.DataFrame):
+    """
+    Given an analysis DataFrame where the dataset is a `GaussianProcessDataset`,
+    expands the dataset's name into columns describing its properties
+    (seed, lengthscale and samples_train).
+    If not all datasets are `GaussianProcessDataset`s, returns `df` unchanged.
+    """
+    dataset_cols = df["dataset"].str.split("-", expand=True)
+    if dataset_cols.iloc[0, 0] != "gp" or dataset_cols[0].nunique() > 1:
+        # Not all datasets are gp datasets - do nothing
+        return df
+
+    # Naming format: gp-{seed}-{lengthscale}-{samples_train}
+    del dataset_cols[0]  # The constant "gp"
+    prefix = ""
+    dataset_cols.columns = [
+        prefix + "seed",
+        prefix + "lengthscale",
+        prefix + "samples_train",
+    ]
+    dataset_cols = dataset_cols.astype({
+        prefix + "seed": np.int32,
+        prefix + "lengthscale": np.float32,
+        prefix + "samples_train": np.int32,
+    })
+    res = df.join(dataset_cols)
+    # del res["dataset"]
+    return res

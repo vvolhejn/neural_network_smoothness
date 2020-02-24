@@ -3,6 +3,7 @@ import multiprocessing
 import datetime
 import os
 import itertools
+import copy
 
 import sacred
 import numpy as np
@@ -10,7 +11,7 @@ import pandas as pd
 
 DEBUG = False
 
-ex = sacred.Experiment("model_comparison")
+ex = sacred.Experiment("model_comparison_gp")
 
 observer = sacred.observers.MongoObserver(
     url="mongodb://mongochl.docker.ist.ac.at:9060", db_name="vv-smoothness"
@@ -21,16 +22,22 @@ if not DEBUG:
 
 @ex.config
 def config():
-    learning_rates = [0.01, 0.003]
-    init_scales = [3.0, 1.0, 0.3]
-    hidden_sizes = list(np.logspace(np.log10(50), np.log10(4000), 20).astype(int))
-    epochs = 20000
-    batch_sizes = [128, 256, 512]
-    processes = 18
-    iterations = 3
+    learning_rates = [0.01]
+    init_scales = [10.0]
+    hidden_sizes = [100, 1000]
+    epochs = 100000
+    batch_sizes = [None]
+    processes = 8
+    iterations = 1
     log_dir = "logs/"
-    dataset = "cifar10"
-    loss_threshold = 0.03
+    datasets = []
+    for seed in range(1, 6):
+        for lengthscale in [0.1, 0.3, 1.0]:
+            for samples_train in np.linspace(2 / lengthscale, 10 / lengthscale, 9).astype(int):
+                datasets.append("gp-{}-{}-{}".format(seed, lengthscale, samples_train))
+    # datasets = "gp_123"
+    loss_threshold = 1e-5
+    activation = "relu"
 
 
 class Hyperparams:
@@ -45,6 +52,7 @@ class Hyperparams:
         init_scale,
         dataset: str,
         loss_threshold: float,
+        activation: str,
     ):
         self.learning_rate = learning_rate
         self.hidden_size = hidden_size
@@ -55,6 +63,10 @@ class Hyperparams:
         self.init_scale = init_scale
         self.dataset = dataset
         self.loss_threshold = loss_threshold
+        self.activation = activation
+
+    def __repr__(self):
+        return str(vars(self))
 
 
 def get_process_id():
@@ -74,24 +86,31 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
 
     # Hacky - we're relying on an undocumented internal variable
     process_id = get_process_id()
-    smooth.util.tensorflow_init(gpu_indices=[process_id % 3 + 1])
+    # smooth.util.tensorflow_init(gpu_indices=[process_id % 3 + 1])
+    smooth.util.tensorflow_init(gpu_indices=[])
 
     import smooth.model
     import smooth.datasets
 
-    dataset = smooth.datasets.get_keras_image_dataset(hparams.dataset)
+    if hparams.dataset.startswith("gp-"):
+        dataset = smooth.datasets.GaussianProcessDataset.from_name(hparams.dataset)
+    else:
+        dataset = smooth.datasets.get_keras_image_dataset(hparams.dataset)
 
-    model = smooth.model.train_shallow_relu(
+    kwargs = copy.deepcopy(vars(hparams))
+    del kwargs["dataset"]
+
+    if kwargs["batch_size"] is None:
+        # Batch size == None -> use GD (batch size is the training set's size)
+        kwargs["batch_size"] = len(dataset.x_train)
+
+    model = smooth.model.train_shallow(
         dataset=dataset,
-        learning_rate=hparams.learning_rate,
-        init_scale=hparams.init_scale,
-        hidden_size=hparams.hidden_size,
-        epochs=hparams.epochs,
-        batch_size=hparams.batch_size,
-        log_dir=hparams.log_dir,
-        iteration=hparams.iteration,
         verbose=verbose,
-        loss_threshold=hparams.loss_threshold,
+        callbacks=[],
+        train_val_split=1.0,
+        # batch_size=len(dataset.x_train),
+        **kwargs,
     )
     model.save(os.path.join(model.log_dir, "model.h5"))
     res = vars(hparams).copy()
@@ -100,8 +119,8 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
         model, dataset.x_test, dataset.y_test, samples=1000
     )
     res.update(measures)
-    # print("Done with", vars(hparams))
-    print("Finished model training:", res)
+    print("Finished model training of", model.id)
+    print("   ", res)
     return res
 
 
@@ -116,8 +135,9 @@ def main(
     processes,
     iterations,
     log_dir,
-    dataset,
+    datasets,
     loss_threshold,
+    activation,
 ):
     if DEBUG:
         log_dir = "logs_debug/"
@@ -132,11 +152,12 @@ def main(
             [log_dir],
             range(iterations),
             init_scales,
-            [dataset],
+            datasets,
             [loss_threshold],
+            [activation],
         )
     )
-    hyperparams_to_try = [Hyperparams(*l) for l in hyperparam_combinations]
+    hyperparams_to_try = [Hyperparams(*hp) for hp in hyperparam_combinations]
 
     # Shuffle to avoid having all of the "hard" hyperparameters at the end
     np.random.shuffle(hyperparams_to_try)

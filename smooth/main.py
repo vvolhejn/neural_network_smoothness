@@ -12,6 +12,7 @@ def main():
         init_scale=1.0,
         dataset="cifar10",
         loss_threshold=0.03,
+        activation="relu",
     )
 
     res = train_models.train_model(hparams, verbose=1)

@@ -39,38 +39,13 @@ def get_model_id(**kwargs):
     )
 
 
-def train_shallow_relu(
+def get_shallow(
     dataset: smooth.datasets.Dataset,
-    learning_rate,
-    init_scale,
-    hidden_size=200,
-    epochs=1000,
-    batch_size=512,
-    iteration=None,
-    verbose=0,
-    loss_threshold=0.0,
-    log_dir=None,
-    callbacks: List[tf.keras.callbacks.Callback] = [],
-    train_val_split=0.9
+    learning_rate: float,
+    init_scale: float,
+    hidden_size: int,
+    activation: str,  # "relu", "tanh" etc.
 ):
-    """
-    Trains a single-layer ReLU network.
-
-    :param dataset:
-    :param learning_rate:
-    :param init_scale:
-    :param hidden_size:
-    :param epochs:
-    :param batch_size:
-    :param iteration: Used only as an additional identifier
-        (for training multiple models with the same hyperparams)
-    :param verbose: Verbosity level passed to `model.fit`
-    :param loss_threshold: Stop training when this loss is reached.
-    :param log_dir: Where to save Tensorboard logs. If None, Tensorboard is not used.
-    :param callbacks: list of tf.keras.Callback functions
-    :param train_val_split: 0.9 = use 90% for training, 10% for validation
-    :return: A trained model.
-    """
     # Classification or regression?
     classification = "Classification" in type(dataset).__name__
 
@@ -79,7 +54,7 @@ def train_shallow_relu(
     model.add(
         layers.Dense(
             hidden_size,
-            activation="relu",
+            activation=activation,
             kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
             bias_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
         )
@@ -98,6 +73,45 @@ def train_shallow_relu(
         metrics=["accuracy"] if classification else ["mae"],
     )
 
+    return model
+
+
+def train_shallow(
+    dataset: smooth.datasets.Dataset,
+    learning_rate,
+    init_scale,
+    hidden_size=200,
+    epochs=1000,
+    batch_size=512,
+    iteration=None,
+    verbose=0,
+    loss_threshold=0.0,
+    log_dir=None,
+    callbacks: List[tf.keras.callbacks.Callback] = [],
+    train_val_split=0.9,
+    activation="relu",
+):
+    """
+    Trains a single-layer ReLU network.
+
+    :param dataset:
+    :param learning_rate:
+    :param init_scale:
+    :param hidden_size:
+    :param epochs:
+    :param batch_size:
+    :param iteration: Used only as an additional identifier
+        (for training multiple models with the same hyperparams)
+    :param verbose: Verbosity level passed to `model.fit`
+    :param loss_threshold: Stop training when this loss is reached.
+    :param log_dir: Where to save Tensorboard logs. If None, Tensorboard is not used.
+    :param callbacks: list of tf.keras.Callback functions
+    :param train_val_split: 0.9 = use 90% for training, 10% for validation
+    :param activation: activation function for the hidden layer
+    :return: A trained model.
+    """
+    model = get_shallow(dataset, learning_rate, init_scale, hidden_size, activation)
+
     x_train, y_train, x_val, y_val = split_dataset(
         dataset.x_train, dataset.y_train, train_val_split
     )
@@ -113,6 +127,7 @@ def train_shallow_relu(
         epochs=epochs,
         batch_size=batch_size,
         iteration=iteration,
+        dataset=dataset.name,
     )
 
     callbacks += [
@@ -121,14 +136,16 @@ def train_shallow_relu(
 
     if log_dir is not None:
         # Use TensorBoard.
-        measures_cb = smooth.callbacks.Measures(x_val, y_val)
-        tensorboard_cb = smooth.callbacks.TensorBoard(model.log_dir, validation_freq)
-
         model.log_dir = os.path.join(log_dir, model.id)
+        print("Log dir: ", model.log_dir)
+
         file_writer = tf.summary.create_file_writer(
             os.path.join(model.log_dir, "train")
         )
         file_writer.set_as_default()
+
+        measures_cb = smooth.callbacks.Measures(dataset.x_test, dataset.y_test)
+        tensorboard_cb = smooth.callbacks.TensorBoard(model.log_dir, validation_freq)
 
         callbacks += [tensorboard_cb, measures_cb]
 
@@ -148,5 +165,43 @@ def train_shallow_relu(
     model.plot_title = "lr={:.2f}, init_scale={:.2f}, ".format(
         learning_rate, init_scale
     ) + "h={}, ep={}".format(hidden_size, epochs)
+
+    return model
+
+
+def interpolate_relu_network(dataset: smooth.datasets.Dataset, use_test_set=False):
+    """
+    Creates a shallow ReLU network which interpolates the 1D training data.
+    Returns an error when the data is multidimensional.
+    If `use_test_set` is True, interpolates the test set rather than the training set.
+    """
+    if use_test_set:
+        x = dataset.x_test.squeeze()
+        y = dataset.y_test.squeeze()
+    else:
+        x = dataset.x_train.squeeze()
+        y = dataset.y_train.squeeze()
+
+    assert len(x.shape) == 1
+    model = get_shallow(
+        dataset,
+        learning_rate=0.0,  # Not used, but needed in model compilation
+        init_scale=1.0,  # Not used, but needed in model compilation
+        hidden_size=len(x),
+        activation="relu",
+    )
+    weights = model.get_weights()
+    weights[0] = np.ones_like(weights[0])
+    weights[1] = -x
+    weights[2] = np.zeros_like(weights[2])
+    weights[3] = np.reshape(y[0], (1,))
+
+    slope = 0.
+    for i in range(0, len(x)-1):
+        target_slope = (y[i+1]-y[i])/(x[i+1]-x[i])
+        weights[2][i] = target_slope - slope
+        slope = target_slope
+
+    model.set_weights(weights)
 
     return model
