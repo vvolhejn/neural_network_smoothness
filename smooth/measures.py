@@ -129,11 +129,11 @@ def _total_variation(samples, batch=False):
 
 def _interpolate(a, b, n_samples):
     """
-    >>> _interpolate(1, 2, 3).tolist()
+    >>> _interpolate(1, 2, 3).round(1).tolist()
     [1.0, 1.5, 2.0]
-    >>> _interpolate([0, 3], [3, 0], 4).tolist()
+    >>> _interpolate([0, 3], [3, 0], 4).round(1).tolist()
     [[0.0, 3.0], [1.0, 2.0], [2.0, 1.0], [3.0, 0.0]]
-    >>> _interpolate([[0, 2], [1, 1]], [[2, 0], [2, 2]], 3).tolist()
+    >>> _interpolate([[0, 2], [1, 1]], [[2, 0], [2, 2]], 3).round(1).tolist()
     [[[0.0, 2.0], [1.0, 1.0]], [[1.0, 1.0], [1.5, 1.5]], [[2.0, 0.0], [2.0, 2.0]]]
     """
     a, b = np.array(a), np.array(b)

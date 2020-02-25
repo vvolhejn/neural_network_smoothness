@@ -9,9 +9,15 @@ import smooth.util
 class Dataset:
     def __init__(self, x_train, y_train, x_test, y_test, name=None):
         # Here we cast integers to floats as well, which maybe we should avoid.
+        def preprocess(arr):
+            arr = np.array(arr).astype(dtype=np.float32)
+            if len(arr.shape) == 1:
+                return arr[:, np.newaxis]
+            else:
+                return arr
+
         x_train, y_train, x_test, y_test = [
-            np.array(arr).astype(dtype=np.float32)
-            for arr in [x_train, y_train, x_test, y_test]
+            preprocess(arr) for arr in [x_train, y_train, x_test, y_test]
         ]
         self.x_train = x_train
         self.x_test = x_test
@@ -114,6 +120,7 @@ class GaussianProcessDataset(Dataset):
         samples_train: int,
         lengthscale: float,
         seed=None,
+        dim=1,
         # noise_var=0.01,
         plot=False,
     ):
@@ -123,9 +130,9 @@ class GaussianProcessDataset(Dataset):
             # For our purposes, one of 1e4 seeds is enough.
             seed = np.random.randint(int(1e4))
         self.seed = seed
+        self.dim = dim
         noise_var = 0.001
         x_min, x_max = -1, 1
-        samples_test = int(50 / lengthscale)
 
         model = GPy.models.GPRegression(
             # It seems the constructor needs at least 1 data point.
@@ -138,17 +145,17 @@ class GaussianProcessDataset(Dataset):
         self.model = model
 
         with smooth.util.NumpyRandomSeed(seed):
-            # We want the seed to identify the function, so start by sampling
-            # a ground truth function before sampling the training and test sets
-            true_samples = int(50 / lengthscale)
-            x_true = np.linspace(x_min, x_max, true_samples).reshape(-1, 1)
-            y_true = model.posterior_samples_f(x_true, full_cov=True, size=1)[:, :, 0]
-            model.set_XY(x_true, y_true)
-
-            x_train = np.linspace(x_min, x_max, samples_train).reshape(-1, 1)
-            y_train = model.posterior_samples_f(x_train, full_cov=True, size=1)[:, :, 0]
+            # We want the seed to identify the function, so start by sampling the test
+            # set (a ground truth function) before sampling the training set
+            samples_test = int(50 / lengthscale)
             x_test = np.linspace(x_min, x_max, samples_test).reshape(-1, 1)
             y_test = model.posterior_samples_f(x_test, full_cov=True, size=1)[:, :, 0]
+            model.set_XY(x_test, y_test)
+
+            assert samples_train <= samples_test
+            indices = smooth.util.subsample_regularly(samples_test, samples_train)
+            x_train = x_test[indices]
+            y_train = model.posterior_samples_f(x_train, full_cov=True, size=1)[:, :, 0]
 
         if plot:
             plt.plot(x_test, y_test)
@@ -158,14 +165,17 @@ class GaussianProcessDataset(Dataset):
         super().__init__(x_train, y_train, x_test, y_test, name=self.get_name())
 
     def get_name(self):
-        return "gp-{}-{}-{}".format(self.seed, self.lengthscale, self.samples_train)
+        return "gp-{}-{}-{}-{}".format(
+            self.dim, self.seed, self.lengthscale, self.samples_train
+        )
 
     @staticmethod
     def from_name(name):
         parts = name.split("-")
-        gp, seed, lengthscale, samples_train = parts
+        gp, dim, seed, lengthscale, samples_train = parts
         assert gp == "gp"
         return GaussianProcessDataset(
+            dim=int(dim),
             seed=int(seed),
             lengthscale=float(lengthscale),
             samples_train=int(samples_train),

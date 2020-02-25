@@ -22,19 +22,23 @@ if not DEBUG:
 
 @ex.config
 def config():
-    learning_rates = [0.01]
+    learning_rates = [0.03]
     init_scales = [10.0]
     hidden_sizes = [100, 1000]
     epochs = 100000
     batch_sizes = [None]
-    processes = 8
-    iterations = 1
+    processes = 16
+    iterations = 3
     log_dir = "logs/"
     datasets = []
     for seed in range(1, 6):
         for lengthscale in [0.1, 0.3, 1.0]:
-            for samples_train in np.linspace(2 / lengthscale, 10 / lengthscale, 9).astype(int):
-                datasets.append("gp-{}-{}-{}".format(seed, lengthscale, samples_train))
+            for samples_train in np.linspace(
+                2 / lengthscale, 10 / lengthscale, 9
+            ).astype(int):
+                datasets.append(
+                    "gp-1-{}-{}-{}".format(seed, lengthscale, samples_train)
+                )
     # datasets = "gp_123"
     loss_threshold = 1e-5
     activation = "relu"

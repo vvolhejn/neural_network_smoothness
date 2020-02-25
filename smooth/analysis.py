@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation
 import pandas as pd
 import scipy.stats
+import tqdm.notebook
+
 
 import smooth.datasets
 
@@ -188,19 +190,50 @@ def expand_dataset_columns(df: pd.DataFrame):
         # Not all datasets are gp datasets - do nothing
         return df
 
-    # Naming format: gp-{seed}-{lengthscale}-{samples_train}
+    # Naming format: gp-{dim}-{seed}-{lengthscale}-{samples_train}
     del dataset_cols[0]  # The constant "gp"
     prefix = ""
     dataset_cols.columns = [
+        prefix + "dim",
         prefix + "seed",
         prefix + "lengthscale",
         prefix + "samples_train",
     ]
-    dataset_cols = dataset_cols.astype({
-        prefix + "seed": np.int32,
-        prefix + "lengthscale": np.float32,
-        prefix + "samples_train": np.int32,
-    })
+    dataset_cols = dataset_cols.astype(
+        {
+            prefix + "dim": np.int32,
+            prefix + "seed": np.int32,
+            prefix + "lengthscale": np.float32,
+            prefix + "samples_train": np.int32,
+        }
+    )
     res = df.join(dataset_cols)
     # del res["dataset"]
     return res
+
+
+def get_interpolation_measures(dataset_names, use_test_set=False, use_polynomial=False):
+    """
+    For the GP datasets in `dataset_names`, take the measures of certain special models.
+    If `use_polynomial` is False, interpolates a piecewise linear function between
+    either the training or test set (based on `use_test_set`).
+    If `use_polynomial` is True, interpolates a polynomial between the training set
+    (it would be pointless to do this for the test set).
+    """
+    res = []
+    for dataset_name in tqdm.notebook.tqdm(dataset_names):
+        dataset = smooth.datasets.GaussianProcessDataset.from_name(dataset_name)
+        if use_polynomial:
+            model = smooth.model.interpolate_polynomial(dataset)
+        else:
+            model = smooth.model.interpolate_relu_network(dataset, use_test_set)
+
+        measures = smooth.measures.get_measures(
+            model, dataset.x_test, dataset.y_test, include_training_measures=False,
+        )
+        res.append(measures)
+
+    df = pd.DataFrame(res, index=pd.Index(dataset_names, name="dataset"))
+    df["dataset"] = df.index
+    df = expand_dataset_columns(df)
+    return df

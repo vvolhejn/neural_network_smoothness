@@ -2,6 +2,7 @@ import re
 import os
 import datetime
 from typing import List
+import warnings
 
 import numpy as np
 import tensorflow as tf
@@ -196,12 +197,41 @@ def interpolate_relu_network(dataset: smooth.datasets.Dataset, use_test_set=Fals
     weights[2] = np.zeros_like(weights[2])
     weights[3] = np.reshape(y[0], (1,))
 
+    # We need to go through the array ordered by increasing x
+    p = np.argsort(x)
     slope = 0.
-    for i in range(0, len(x)-1):
-        target_slope = (y[i+1]-y[i])/(x[i+1]-x[i])
-        weights[2][i] = target_slope - slope
+    for i in range(0, len(x) - 1):
+        target_slope = (y[p[i + 1]] - y[p[i]]) / (x[p[i + 1]] - x[p[i]])
+        weights[2][p[i]] = target_slope - slope
         slope = target_slope
 
     model.set_weights(weights)
 
+    return model
+
+def interpolate_polynomial(dataset: smooth.datasets.Dataset, deg=None):
+    """
+    Fits a polynomial to the training data. If the degree is not given, it is chosen
+    as the lowest degree which can interpolate the data, so `len(x_train)-1`.
+    Returns a tf.keras.Model representation of the polynomial.
+    """
+    assert len(dataset.x_train.squeeze().shape) == 1
+    if deg is None:
+        deg = len(dataset.x_train) - 1
+
+    with warnings.catch_warnings():
+        # The fit() function raises warnings about the polynomial being ill-conditioned
+        # but we don't care about that
+        warnings.simplefilter("ignore")
+
+        poly = np.polynomial.polynomial.Polynomial.fit(
+            x=np.squeeze(dataset.x_train),
+            y=np.squeeze(dataset.y_train),
+            deg=deg,
+        )
+
+    y_pred = poly(dataset.x_test)
+    # .linspace(n=200, domain=(-1, 1))
+    poly_dataset = smooth.datasets.Dataset(dataset.x_test, y_pred, [], [])
+    model = smooth.model.interpolate_relu_network(poly_dataset)
     return model
