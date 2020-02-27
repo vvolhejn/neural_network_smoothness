@@ -25,9 +25,16 @@ def measure_saved_model(args):
     process_id = multiprocessing.current_process()._identity[0]
     smooth.util.tensorflow_init([gpu_indices[process_id % len(gpu_indices)]])
 
+    # TODO: un-hardcode
     mnist = smooth.datasets.get_mnist()
     model = tf.keras.models.load_model(model_path)
-    measures = smooth.model.get_measures(model, mnist, include_training_measures=False)
+    measures = smooth.measures.get_measures(
+        model,
+        x=mnist.x_test,
+        y=mnist.y_test,
+        include_training_measures=False,
+        is_classification=True,
+    )
     measures["model_path"] = model_path
     return measures
 

@@ -65,12 +65,16 @@ def get_shallow(
             dataset.n_classes if classification else 1,
             kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
             bias_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
-            activation="softmax" if classification else None,
+            activation=None,
         )
     )
     model.compile(
         optimizer=tf.keras.optimizers.SGD(learning_rate),
-        loss="sparse_categorical_crossentropy" if classification else "mse",
+        loss=(
+            tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+            if classification
+            else "mse"
+        ),
         metrics=["accuracy"] if classification else ["mae"],
     )
 
@@ -133,6 +137,7 @@ def train_shallow(
 
     callbacks += [
         smooth.callbacks.Stopping(loss_threshold),
+        tf.keras.callbacks.TerminateOnNaN(),
     ]
 
     if log_dir is not None:
@@ -199,7 +204,7 @@ def interpolate_relu_network(dataset: smooth.datasets.Dataset, use_test_set=Fals
 
     # We need to go through the array ordered by increasing x
     p = np.argsort(x)
-    slope = 0.
+    slope = 0.0
     for i in range(0, len(x) - 1):
         target_slope = (y[p[i + 1]] - y[p[i]]) / (x[p[i + 1]] - x[p[i]])
         weights[2][p[i]] = target_slope - slope
@@ -208,6 +213,7 @@ def interpolate_relu_network(dataset: smooth.datasets.Dataset, use_test_set=Fals
     model.set_weights(weights)
 
     return model
+
 
 def interpolate_polynomial(dataset: smooth.datasets.Dataset, deg=None):
     """
@@ -225,9 +231,7 @@ def interpolate_polynomial(dataset: smooth.datasets.Dataset, deg=None):
         warnings.simplefilter("ignore")
 
         poly = np.polynomial.polynomial.Polynomial.fit(
-            x=np.squeeze(dataset.x_train),
-            y=np.squeeze(dataset.y_train),
-            deg=deg,
+            x=np.squeeze(dataset.x_train), y=np.squeeze(dataset.y_train), deg=deg,
         )
 
     y_pred = poly(dataset.x_test)

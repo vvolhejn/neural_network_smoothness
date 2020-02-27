@@ -11,7 +11,6 @@ import pandas as pd
 import scipy.stats
 import tqdm.notebook
 
-
 import smooth.datasets
 
 
@@ -186,27 +185,35 @@ def expand_dataset_columns(df: pd.DataFrame):
     If not all datasets are `GaussianProcessDataset`s, returns `df` unchanged.
     """
     dataset_cols = df["dataset"].str.split("-", expand=True)
-    if dataset_cols.iloc[0, 0] != "gp" or dataset_cols[0].nunique() > 1:
+    # dataset_cols.iloc[0, 0] != "gp" or
+    if dataset_cols[0].nunique() > 1:
         # Not all datasets are gp datasets - do nothing
         return df
 
-    # Naming format: gp-{dim}-{seed}-{lengthscale}-{samples_train}
-    del dataset_cols[0]  # The constant "gp"
+    dataset_name = dataset_cols.iloc[0, 0]
+    del dataset_cols[0]  # A constant like "gp" or "mnist" etc.
+
     prefix = ""
-    dataset_cols.columns = [
-        prefix + "dim",
-        prefix + "seed",
-        prefix + "lengthscale",
-        prefix + "samples_train",
-    ]
-    dataset_cols = dataset_cols.astype(
-        {
-            prefix + "dim": np.int32,
-            prefix + "seed": np.int32,
-            prefix + "lengthscale": np.float32,
-            prefix + "samples_train": np.int32,
-        }
-    )
+    if dataset_name == "gp":
+        # Naming format: gp-{dim}-{seed}-{lengthscale}-{samples_train}
+        dataset_cols.columns = [
+            prefix + "dim",
+            prefix + "seed",
+            prefix + "lengthscale",
+            prefix + "samples_train",
+        ]
+        dataset_cols = dataset_cols.astype(
+            {
+                prefix + "dim": np.int32,
+                prefix + "seed": np.int32,
+                prefix + "lengthscale": np.float32,
+                prefix + "samples_train": np.int32,
+            }
+        )
+    else:
+        dataset_cols.columns = [prefix + "samples_train"]
+        dataset_cols = dataset_cols.astype({prefix + "samples_train": np.int32})
+
     res = df.join(dataset_cols)
     # del res["dataset"]
     return res

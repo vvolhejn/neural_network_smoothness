@@ -41,8 +41,8 @@ class Measures(tf.keras.callbacks.Callback):
         measure_names = [
             "gradient_norm",
             "l2",
-            "seg_total_variation",
-            "seg_total_variation_derivative",
+            "path_length_f",
+            "path_length_d",
         ]
         history = self.model.history.history
         step = len(history["loss"]) + 1
@@ -120,4 +120,3 @@ class WeightsHistoryCallback(tf.keras.callbacks.Callback):
                 if epoch % self.epochs_per_save == 0
             }
             assert len(self.weights_history) == self.min_snapshots
-            print(sorted(self.weights_history.keys())[:5])

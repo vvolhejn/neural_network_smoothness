@@ -42,10 +42,10 @@ def test_relu_net():
     assert np.allclose(y, f_ex(x), atol=0.5)
 
 
-def test_segment_total_variation():
+def test_path_length_f():
     x1 = np.array([1, 1], dtype=np.float32)
     x2 = np.array([2, 1], dtype=np.float32)
-    tv = measures._segment_total_variation(
+    tv = measures.path_length_one_sample(
         model, x1, x2, n_samples=100, derivative=False
     )
     # x1 and x2 are selected in a way where the function between them is just linear,
@@ -53,16 +53,16 @@ def test_segment_total_variation():
     assert np.isclose(tv, np.linalg.norm(f_ex(x1) - f_ex(x2)), atol=0.5)
 
 
-def test_segment_total_variation_derivative():
+def test_path_length_d():
     x1 = np.array([1, 1], dtype=np.float32)
     x2 = np.array([2, 1], dtype=np.float32)
-    tv = measures._segment_total_variation(
+    tv = measures.path_length_one_sample(
         model, x1, x2, n_samples=100, derivative=True
     )
     # Within one "segment" of this piecewise linear function, the Jacobian is constant
     assert np.isclose(tv, 0, atol=0.5)
     x2 = np.array([-1, 1], dtype=np.float32)
-    tv = measures._segment_total_variation(
+    tv = measures.path_length_one_sample(
         model, x1, x2, n_samples=100, derivative=True
     )
     # Here we cross a border and the Jacobian changes by 2 at two positions,

@@ -11,37 +11,66 @@ import pandas as pd
 
 DEBUG = False
 
-ex = sacred.Experiment("model_comparison_gp")
+ex = sacred.Experiment("gp_nd_increasing_measures")
 
 observer = sacred.observers.MongoObserver(
     url="mongodb://mongochl.docker.ist.ac.at:9060", db_name="vv-smoothness"
 )
+
 if not DEBUG:
     ex.observers.append(observer)
 
 
 @ex.config
 def config():
-    learning_rates = [0.03]
-    init_scales = [10.0]
-    hidden_sizes = [100, 1000]
-    epochs = 100000
-    batch_sizes = [None]
-    processes = 16
-    iterations = 3
+    GP = True
+
     log_dir = "logs/"
-    datasets = []
-    for seed in range(1, 6):
-        for lengthscale in [0.1, 0.3, 1.0]:
-            for samples_train in np.linspace(
-                2 / lengthscale, 10 / lengthscale, 9
-            ).astype(int):
-                datasets.append(
-                    "gp-1-{}-{}-{}".format(seed, lengthscale, samples_train)
-                )
-    # datasets = "gp_123"
-    loss_threshold = 1e-5
     activation = "relu"
+    dry_run = False
+
+    if GP:
+        processes = 32
+        learning_rates = [0.003]
+        init_scales = [1.0]
+        hidden_sizes = [10, 30, 100]
+        epochs = 100000
+        batch_sizes = [64]
+
+        iterations = 3
+        datasets = [
+            "gp-{}-{}-{}-{}".format(dim, seed, lengthscale, samples_train)
+            for (dim, seed, lengthscale, samples_train) in itertools.product(
+                [100],
+                range(1, 6),
+                [1.0],
+                np.logspace(np.log10(10), np.log10(1000), 10).round().astype(int),
+            )
+        ]
+        loss_threshold = 1e-5
+        use_gpu = False
+        train_val_split = 1.0
+    else:
+        processes = 9
+        learning_rates = [0.01]
+        init_scales = [1.0]
+        # hidden_sizes = [10, 30, 100, 300]
+        hidden_sizes = [1, 2, 4, 8, 16, 32]
+        epochs = 20000
+        batch_sizes = [128]
+
+        iterations = 3
+
+        datasets = [
+            "mnist-{}".format(n_samples)
+            for n_samples in np.logspace(np.log10(60), np.log10(60000), 20)
+            .round()
+            .astype(int)
+        ]
+
+        loss_threshold = 0.01
+        use_gpu = True
+        train_val_split = 0.9
 
 
 class Hyperparams:
@@ -57,6 +86,8 @@ class Hyperparams:
         dataset: str,
         loss_threshold: float,
         activation: str,
+        use_gpu: bool,
+        train_val_split: float,
     ):
         self.learning_rate = learning_rate
         self.hidden_size = hidden_size
@@ -68,6 +99,8 @@ class Hyperparams:
         self.dataset = dataset
         self.loss_threshold = loss_threshold
         self.activation = activation
+        self.use_gpu = use_gpu
+        self.train_val_split = train_val_split
 
     def __repr__(self):
         return str(vars(self))
@@ -90,19 +123,24 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
 
     # Hacky - we're relying on an undocumented internal variable
     process_id = get_process_id()
-    # smooth.util.tensorflow_init(gpu_indices=[process_id % 3 + 1])
-    smooth.util.tensorflow_init(gpu_indices=[])
+    smooth.util.tensorflow_init(
+        gpu_indices=[process_id % 3 + 1] if hparams.use_gpu else []
+    )
 
     import smooth.model
     import smooth.datasets
+    import smooth.measures
 
-    if hparams.dataset.startswith("gp-"):
-        dataset = smooth.datasets.GaussianProcessDataset.from_name(hparams.dataset)
-    else:
-        dataset = smooth.datasets.get_keras_image_dataset(hparams.dataset)
+    try:
+        dataset = smooth.datasets.from_name(hparams.dataset)
+    except np.linalg.LinAlgError as e:
+        # Sometimes "SVD did not converge" can happen when creating a GP dataset
+        return {"error": str(e)}
 
     kwargs = copy.deepcopy(vars(hparams))
-    del kwargs["dataset"]
+    non_training_hparams = ["dataset", "use_gpu"]
+    for p in non_training_hparams:
+        del kwargs[p]
 
     if kwargs["batch_size"] is None:
         # Batch size == None -> use GD (batch size is the training set's size)
@@ -112,12 +150,12 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
         dataset=dataset,
         verbose=verbose,
         callbacks=[],
-        train_val_split=1.0,
         # batch_size=len(dataset.x_train),
         **kwargs,
     )
     model.save(os.path.join(model.log_dir, "model.h5"))
     res = vars(hparams).copy()
+
     res["log_dir"] = model.log_dir
     measures = smooth.measures.get_measures(
         model, dataset.x_test, dataset.y_test, samples=1000
@@ -142,9 +180,13 @@ def main(
     datasets,
     loss_threshold,
     activation,
+    dry_run,
+    use_gpu,
+    train_val_split,
 ):
     if DEBUG:
         log_dir = "logs_debug/"
+
     log_dir = os.path.join(log_dir, datetime.datetime.now().strftime("%m%d-%H%M%S"))
 
     hyperparam_combinations = list(
@@ -159,9 +201,14 @@ def main(
             datasets,
             [loss_threshold],
             [activation],
+            [use_gpu],
+            [train_val_split]
         )
     )
     hyperparams_to_try = [Hyperparams(*hp) for hp in hyperparam_combinations]
+    if dry_run:
+        print("Models to train:", len(hyperparams_to_try))
+        return
 
     # Shuffle to avoid having all of the "hard" hyperparameters at the end
     np.random.shuffle(hyperparams_to_try)

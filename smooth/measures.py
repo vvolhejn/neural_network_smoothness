@@ -14,46 +14,66 @@ def get_measures(
     samples=1000,
     # If set, instead of sampling segments use one segment spanning the entire domain
     precise_in_1d=True,
+    is_classification=False,
 ):
-    grad_norm = gradient_norm(model, x[:samples])
-    l2 = average_l2(model)
-
-    if x[0].squeeze().shape == () and y[0].squeeze().shape == () and precise_in_1d:
-        seg_total_variation = _segment_total_variation(
-            model,
-            np.min(x, axis=0),
-            np.max(x, axis=0),
-            n_samples=samples,
-            derivative=False,
-        )
-        seg_total_variation_derivative = _segment_total_variation(
-            model,
-            np.min(x, axis=0),
-            np.max(x, axis=0),
-            n_samples=samples,
-            derivative=True,
-        )
-    else:
-        seg_total_variation = segments_total_variation(
-            model, x, segments_per_batch=100, segments=samples,
-        )
-        seg_total_variation_derivative = segments_total_variation(
-            model, x, derivative=True, segments_per_batch=10, segments=samples,
-        )
-
-    res = dict(
-        gradient_norm=grad_norm,
-        l2=l2,
-        seg_total_variation=seg_total_variation,
-        seg_total_variation_derivative=seg_total_variation_derivative,
-    )
+    res = {}
 
     # For metrics recorded by keras itself, such as loss, accuracy/mae
     tf_metrics = dict(
         zip(model.metrics_names, model.evaluate(x, y, batch_size=256, verbose=0),)
     )
+
     for k, v in tf_metrics.items():
         res["test_{}".format(k)] = v
+
+    # This might happen if the learning rate or init scale is too high
+    if not np.isfinite(tf_metrics["loss"]):
+        return res
+
+    grad_norm = gradient_norm(model, x[:samples])
+    l2 = average_l2(model)
+
+    is_1d = x[0].squeeze().shape == () and y[0].squeeze().shape == ()
+
+    if is_1d and precise_in_1d:
+        # 1D case - we can solve this deterministically
+        x_min, x_max = np.min(x, axis=0), np.max(x, axis=0)
+        path_length_f = path_length_one_sample(
+            model, x_min, x_max, n_samples=samples, derivative=False,
+        )
+        path_length_d = path_length_one_sample(
+            model, x_min, x_max, n_samples=samples, derivative=True,
+        )
+    else:
+        path_length_f = path_length(
+            model, x, segments_per_batch=100, segments=samples,
+        )
+        path_length_d = path_length(
+            model, x, derivative=True, segments_per_batch=10, segments=samples,
+        )
+        if is_classification:
+            path_length_f_softmax = path_length(
+                model, x, segments_per_batch=100, segments=samples, softmax=True,
+            )
+            path_length_d_softmax = path_length(
+                model,
+                x,
+                derivative=True,
+                segments_per_batch=10,
+                segments=samples,
+                softmax=True,
+            )
+            res.update(
+                path_length_f_softmax=path_length_f_softmax,
+                path_length_d_softmax=path_length_d_softmax,
+            )
+
+    res.update(
+        gradient_norm=grad_norm,
+        l2=l2,
+        path_length_f=path_length_f,
+        path_length_d=path_length_d,
+    )
 
     if include_training_measures:
         history = model.history.history
@@ -72,6 +92,7 @@ def get_measures(
 
 
 def average_l2(model: tf.keras.Model):
+    """ This is not really l2! """
     total_l2 = 0
     n_weights = 0
     for weight_matrix in model.get_weights():
@@ -95,21 +116,21 @@ def gradient_norm(model: tf.keras.Model, x_input):
     return res
 
 
-def _total_variation(samples, batch=False):
+def _path_length(samples, batch=False):
     """
     Given evenly spaced samples of a function's values, computes an approximation
-    of the total variation, that is the sum of the distances of consecutive samples.
+    of the path length, that is the sum of the distances of consecutive samples.
     For scalar samples, this means the sum of absolute values of the first difference,
     for vector-valued functions we sum the l2 norms of the first difference.
 
     If `batch` is set, we interpret the first axis as the batch axis
     and treat batches separately.
 
-    >>> _total_variation([1, 2, 3, 1])
+    >>> _path_length([1, 2, 3, 1])
     4.0
-    >>> print("{:.3f}".format(_total_variation([[0, 0], [1, 1], [1, 2]])))
+    >>> print("{:.3f}".format(_path_length([[0, 0], [1, 1], [1, 2]])))
     2.414
-    >>> _total_variation([[0, 0], [1, 1], [1, 2]], batch=True)
+    >>> _path_length([[0, 0], [1, 1], [1, 2]], batch=True)
     array([0., 0., 1.])
     """
     if not batch:
@@ -144,8 +165,14 @@ def _interpolate(a, b, n_samples):
     return res
 
 
-def _segment_total_variation(
-    model: tf.keras.Model, x1, x2, n_samples: int, derivative: bool, batch=False
+def path_length_one_sample(
+    model: tf.keras.Model,
+    x1,
+    x2,
+    n_samples: int,
+    derivative: bool,
+    batch=False,
+    softmax=False,
 ):
     if not batch:
         x1 = [x1]
@@ -159,13 +186,18 @@ def _segment_total_variation(
 
     if not derivative:
         output_flat = model.predict(samples_flat, batch_size=1024)
+        if softmax:
+            output_flat = tf.nn.softmax(output_flat)
     else:
         with tf.GradientTape() as g:
             x = tf.constant(samples_flat)
             g.watch(x)
             y = model(x)
+            if softmax:
+                y = tf.nn.softmax(y)
         output_flat = g.batch_jacobian(y, x)
-        # We just stretch the Jacobian into a single vector and take its total variation
+        # We just stretch the Jacobian into a single vector and take the path length
+        # of this vector "moving around".
         # (meaning we sum the Frobenius norms of the first difference)
         # Does this make any sense mathematically?
         output_flat = np.reshape(output_flat, (len(samples_flat), -1))
@@ -173,7 +205,7 @@ def _segment_total_variation(
     output = np.reshape(output_flat, (n_samples, n_segments) + output_flat.shape[1:])
     output = np.swapaxes(output, 0, 1)
     # at this point, `output` has shape (n_segments, n_samples, n_classes)
-    res = _total_variation(output, batch=True)
+    res = _path_length(output, batch=True)
 
     if not batch:
         assert len(res) == 1
@@ -182,18 +214,19 @@ def _segment_total_variation(
         return res
 
 
-def segments_total_variation(
+def path_length(
     model: tf.keras.Model,
     x_input,
     segments=1000,
     samples_per_segment=100,
     segments_per_batch=10,
     derivative=False,
+    softmax=False,
 ):
     """
-    Takes two random points from `x_input` and calculates the total variation
-    of the model's prediction along the line segment between the two points.
-    This is repeated `n_segments` times and the average total variation is taken.
+    Takes two random points from `x_input` and calculates the path length of the image
+    of the line segment between the two points when passed through the model.
+    This is repeated `n_segments` times and the average is taken.
     """
 
     x = x_input[np.random.randint(len(x_input), size=(2 * segments,))]
@@ -205,8 +238,8 @@ def segments_total_variation(
     results = []
     for batch in batches:
         x1, x2 = np.swapaxes(batch, 0, 1)
-        cur = _segment_total_variation(
-            model, x1, x2, samples_per_segment, derivative, batch=True
+        cur = path_length_one_sample(
+            model, x1, x2, samples_per_segment, derivative, batch=True, softmax=softmax
         )
         results.append(cur)
 
