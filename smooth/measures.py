@@ -31,7 +31,7 @@ def get_measures(
         return res
 
     grad_norm = gradient_norm(model, x[:samples])
-    l2 = average_l2(model)
+    w_rms = weights_rms(model)
 
     is_1d = x[0].squeeze().shape == () and y[0].squeeze().shape == ()
 
@@ -70,7 +70,7 @@ def get_measures(
 
     res.update(
         gradient_norm=grad_norm,
-        l2=l2,
+        weights_rms=w_rms,
         path_length_f=path_length_f,
         path_length_d=path_length_d,
     )
@@ -91,8 +91,7 @@ def get_measures(
     return res
 
 
-def average_l2(model: tf.keras.Model):
-    """ This is not really l2! """
+def weights_rms(model: tf.keras.Model):
     total_l2 = 0
     n_weights = 0
     for weight_matrix in model.get_weights():

@@ -1,8 +1,16 @@
+"""
+Utility functions. Does not import TensorFlow (even indirectly) upon being imported.
+"""
+
 import os
 import heapq
 import itertools
+import multiprocessing
+import datetime
 
 import numpy as np
+import pandas as pd
+import tqdm
 
 
 def tensorflow_init(gpu_indices):
@@ -88,3 +96,43 @@ def subsample_regularly(n, k):
     res = np.array(list(itertools.islice(sample_regularly(n), k)))
     res = np.sort(res)
     return res
+
+
+def get_process_id():
+    # Hacky - we're relying on an undocumented internal variable
+    process_id = multiprocessing.current_process()._identity
+    if process_id == ():
+        # This happens when we're not running inside of a multiprocessing.Pool
+        return 0
+    else:
+        return process_id[0]
+
+
+def run_training_jobs(
+    job_f, params_for_jobs, measures_path, processes, _run, shuffle=True
+):
+    if shuffle:
+        # Shuffle to avoid having all of the "hard" hyperparameters at the end
+        np.random.shuffle(params_for_jobs)
+
+    results = []
+    with multiprocessing.Pool(processes=processes) as pool:
+        for res in tqdm.tqdm(
+            pool.imap_unordered(job_f, params_for_jobs),
+            total=len(params_for_jobs),
+            smoothing=0.1,
+        ):
+            results.append(res)
+            df = pd.DataFrame(results)
+            _run.result = "{}/{} models trained".format(
+                len(results), len(params_for_jobs)
+            )
+            print(_run.result)
+            df.to_feather(measures_path)
+
+
+def get_logdir_name(debug=False):
+    return os.path.join(
+        "logs/" if not debug else "logs_debug/",
+        datetime.datetime.now().strftime("%m%d-%H%M%S")
+    )

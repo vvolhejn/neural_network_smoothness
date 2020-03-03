@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import tensorflow as tf
 import GPy
@@ -56,7 +58,7 @@ class Dataset:
         if self.name is not None:
             name = "{} ({}-sample subset)".format(self.name, n_samples)
 
-        return ClassificationDataset(
+        return Dataset(
             x_train=self.x_train[:n_samples],
             y_train=self.y_train[:n_samples],
             x_test=self.x_test[:n_samples_test],
@@ -160,6 +162,8 @@ def from_name(name):
         return ds
 
 
+# _gp_cache = {}
+
 class GaussianProcessDataset(Dataset):
     def __init__(
         self,
@@ -227,9 +231,27 @@ class GaussianProcessDataset(Dataset):
 
     @staticmethod
     def from_name(name):
+        # MAX_SAMPLES = 1000
         parts = name.split("-")
         gp, dim, seed, lengthscale, samples_train = parts
         assert gp == "gp"
+        # assert int(samples_train) <= MAX_SAMPLES
+        #
+        # sig = (dim, seed, lengthscale)
+        # if sig not in _gp_cache:
+        #     res = GaussianProcessDataset(
+        #         dim=int(dim),
+        #         seed=int(seed),
+        #         lengthscale=float(lengthscale),
+        #         samples_train=MAX_SAMPLES,
+        #     )
+        #     _gp_cache[sig] = res
+        #     logging.debug("Stored {} into cache".format(name))
+        # else:
+        #     logging.debug("Using cache for {}".format(name))
+        #
+        # return _gp_cache[sig].subset(int(samples_train), keep_test_set=True)
+
         return GaussianProcessDataset(
             dim=int(dim),
             seed=int(seed),

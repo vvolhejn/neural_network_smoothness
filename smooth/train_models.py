@@ -13,11 +13,10 @@ DEBUG = False
 
 ex = sacred.Experiment("gp_nd_increasing_measures")
 
-observer = sacred.observers.MongoObserver(
-    url="mongodb://mongochl.docker.ist.ac.at:9060", db_name="vv-smoothness"
-)
-
 if not DEBUG:
+    observer = sacred.observers.MongoObserver(
+        url="mongodb://mongochl.docker.ist.ac.at:9060", db_name="vv-smoothness"
+    )
     ex.observers.append(observer)
 
 
@@ -30,20 +29,21 @@ def config():
     dry_run = False
 
     if GP:
-        processes = 32
+        processes = 8
         learning_rates = [0.003]
         init_scales = [1.0]
-        hidden_sizes = [10, 30, 100]
+        # hidden_sizes = [1, 2, 4, 8, 16, 32]
+        hidden_sizes = [64]
         epochs = 100000
         batch_sizes = [64]
 
         iterations = 3
         datasets = [
-            "gp-{}-{}-{}-{}".format(dim, seed, lengthscale, samples_train)
+            "gp-{}-{}-{}-{}".format(dim, seed, lengthscale * float(dim), samples_train)
             for (dim, seed, lengthscale, samples_train) in itertools.product(
-                [100],
-                range(1, 6),
-                [1.0],
+                [2 ** x for x in range(1, 10)],
+                range(1, 4),
+                [0.3, 1.0],
                 np.logspace(np.log10(10), np.log10(1000), 10).round().astype(int),
             )
         ]
@@ -64,8 +64,8 @@ def config():
         datasets = [
             "mnist-{}".format(n_samples)
             for n_samples in np.logspace(np.log10(60), np.log10(60000), 20)
-            .round()
-            .astype(int)
+                .round()
+                .astype(int)
         ]
 
         loss_threshold = 0.01
@@ -106,23 +106,13 @@ class Hyperparams:
         return str(vars(self))
 
 
-def get_process_id():
-    process_id = multiprocessing.current_process()._identity
-    if process_id == ():
-        # This happens when we're not running inside of a multiprocessing.Pool
-        return 0
-    else:
-        return process_id[0]
-
-
 def train_model(hparams: Hyperparams, verbose: int = 0):
     import os
     import smooth.util
 
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # or any {'0', '1', '2'}
 
-    # Hacky - we're relying on an undocumented internal variable
-    process_id = get_process_id()
+    process_id = smooth.util.get_process_id()
     smooth.util.tensorflow_init(
         gpu_indices=[process_id % 3 + 1] if hparams.use_gpu else []
     )
@@ -130,6 +120,7 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
     import smooth.model
     import smooth.datasets
     import smooth.measures
+    import tensorflow as tf
 
     try:
         dataset = smooth.datasets.from_name(hparams.dataset)
@@ -149,8 +140,10 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
     model = smooth.model.train_shallow(
         dataset=dataset,
         verbose=verbose,
-        callbacks=[],
-        # batch_size=len(dataset.x_train),
+        callbacks=[
+            tf.keras.callbacks.EarlyStopping(monitor="loss", patience=5000,
+                                             min_delta=1e-5)
+        ],
         **kwargs,
     )
     model.save(os.path.join(model.log_dir, "model.h5"))
@@ -213,6 +206,7 @@ def main(
     # Shuffle to avoid having all of the "hard" hyperparameters at the end
     np.random.shuffle(hyperparams_to_try)
 
+    measures_path = os.path.join(log_dir, "measures.feather")
     results = []
     with multiprocessing.Pool(processes=processes) as pool:
         for res in pool.imap_unordered(train_model, hyperparams_to_try):
@@ -222,7 +216,6 @@ def main(
                 len(results), len(hyperparams_to_try)
             )
             print(_run.result)
-            measures_path = os.path.join(log_dir, "measures.feather")
             df.to_feather(measures_path)
 
     ex.add_artifact(measures_path, content_type="application/feather")

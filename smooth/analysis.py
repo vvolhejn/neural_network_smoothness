@@ -10,6 +10,7 @@ import matplotlib.animation
 import pandas as pd
 import scipy.stats
 import tqdm.notebook
+import seaborn as sns
 
 import smooth.datasets
 
@@ -244,3 +245,9 @@ def get_interpolation_measures(dataset_names, use_test_set=False, use_polynomial
     df["dataset"] = df.index
     df = expand_dataset_columns(df)
     return df
+
+
+def make_palette(values):
+    values = sorted(values)
+    pal = dict(zip(values, sns.cubehelix_palette(len(values))))
+    return pal
