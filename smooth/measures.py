@@ -3,41 +3,51 @@ from math import ceil
 
 import tensorflow as tf
 import numpy as np
+import sklearn.kernel_ridge
+import GPy
+
+import smooth.datasets
 
 
 def get_measures(
     model: tf.keras.Model,
-    x: np.ndarray,
-    y: np.ndarray,
-    # dataset: ClassificationDataset,
-    include_training_measures=True,
+    dataset: smooth.datasets.Dataset,
     samples=1000,
     # If set, instead of sampling segments use one segment spanning the entire domain
     precise_in_1d=True,
     is_classification=False,
 ):
     res = {}
+    x_train, y_train = dataset.x_train, dataset.y_train
+    x_test, y_test = dataset.x_test, dataset.y_test
 
     # For metrics recorded by keras itself, such as loss, accuracy/mae
-    tf_metrics = dict(
-        zip(model.metrics_names, model.evaluate(x, y, batch_size=256, verbose=0),)
-    )
+    for name, x, y in [
+        ("train", x_train, y_train),
+        ("test", x_test, y_test),
+    ]:
+        tf_metrics = dict(
+            zip(
+                model.metrics_names,
+                model.evaluate(x[:samples], y[:samples], batch_size=256, verbose=0),
+            )
+        )
 
-    for k, v in tf_metrics.items():
-        res["test_{}".format(k)] = v
+        # This might happen if the learning rate or init scale is too high
+        if not np.isfinite(tf_metrics["loss"]):
+            return res
 
-    # This might happen if the learning rate or init scale is too high
-    if not np.isfinite(tf_metrics["loss"]):
-        return res
+        for k, v in tf_metrics.items():
+            res["{}_{}".format(k, name)] = v
 
-    grad_norm = gradient_norm(model, x[:samples])
-    w_rms = weights_rms(model)
+    res["gradient_norm"] = gradient_norm(model, x_test[:samples])
+    res["weights_rms"] = weights_rms(model)
 
-    is_1d = x[0].squeeze().shape == () and y[0].squeeze().shape == ()
+    is_1d = x_test[0].squeeze().shape == () and y[0].squeeze().shape == ()
 
     if is_1d and precise_in_1d:
         # 1D case - we can solve this deterministically
-        x_min, x_max = np.min(x, axis=0), np.max(x, axis=0)
+        x_min, x_max = np.min(x_test, axis=0), np.max(x_test, axis=0)
         path_length_f = path_length_one_sample(
             model, x_min, x_max, n_samples=samples, derivative=False,
         )
@@ -45,50 +55,72 @@ def get_measures(
             model, x_min, x_max, n_samples=samples, derivative=True,
         )
     else:
-        path_length_f = path_length(
-            model, x, segments_per_batch=100, segments=samples,
-        )
-        path_length_d = path_length(
-            model, x, derivative=True, segments_per_batch=10, segments=samples,
-        )
-        if is_classification:
-            path_length_f_softmax = path_length(
-                model, x, segments_per_batch=100, segments=samples, softmax=True,
+        for suffix, x in [("_train", x_train), ("_test", x_test)]:
+            path_length_f = path_length(
+                model, x, segments_per_batch=100, segments=samples
             )
-            path_length_d_softmax = path_length(
-                model,
-                x,
-                derivative=True,
-                segments_per_batch=10,
-                segments=samples,
-                softmax=True,
+            path_length_d = path_length(
+                model, x, derivative=True, segments_per_batch=10, segments=samples,
             )
             res.update(
-                path_length_f_softmax=path_length_f_softmax,
-                path_length_d_softmax=path_length_d_softmax,
+                {
+                    "path_length_f" + suffix: path_length_f,
+                    "path_length_d" + suffix: path_length_d,
+                }
             )
+            if is_classification:
+                path_length_f_softmax = path_length(
+                    model, x, segments_per_batch=100, segments=samples, softmax=True,
+                )
+                path_length_d_softmax = path_length(
+                    model,
+                    x,
+                    derivative=True,
+                    segments_per_batch=10,
+                    segments=samples,
+                    softmax=True,
+                )
+                res.update(
+                    {
+                        "path_length_f_softmax" + suffix: path_length_f_softmax,
+                        "path_length_d_softmax" + suffix: path_length_d_softmax,
+                    }
+                )
 
-    res.update(
-        gradient_norm=grad_norm,
-        weights_rms=w_rms,
-        path_length_f=path_length_f,
-        path_length_d=path_length_d,
-    )
-
-    if include_training_measures:
-        history = model.history.history
-        for k in model.metrics_names:
-            res["train_{}".format(k)] = history[k][-1]
-
-        res.update(
-            # loss=history["loss"][-1],
-            # accuracy=history["accuracy"][-1],
-            # val_loss=history.get("val_loss", [None])[-1],
-            # val_accuracy=history.get("val_accuracy", [None])[-1],
-            actual_epochs=len(history["loss"]),
-        )
+    try:
+        res["actual_epochs"] = len(model.history.history["loss"])
+    except AttributeError:
+        # If we're measuring a saved model, this information is no longer available
+        # and `model.history` does not exist.
+        pass
 
     return res
+
+
+def get_measures_no_gradient(model, dataset: smooth.datasets.Dataset):
+    """
+    model should have a model.predict(x) method.
+    """
+
+    train_loss = sklearn.metrics.mean_squared_error(
+        model.predict(dataset.x_train), dataset.y_train
+    )
+    test_loss = sklearn.metrics.mean_squared_error(
+        model.predict(dataset.x_test), dataset.y_test
+    )
+    path_length_f_train = smooth.measures.path_length(
+        model, dataset.x_train, segments_per_batch=100
+    )
+    path_length_f_test = smooth.measures.path_length(
+        model, dataset.x_test, segments_per_batch=100
+    )
+
+    return {
+        "train_loss": train_loss,
+        "test_loss": test_loss,
+        "path_length_f_train": path_length_f_train,
+        "path_length_f": path_length_f_test,
+    }
 
 
 def weights_rms(model: tf.keras.Model):
@@ -98,7 +130,7 @@ def weights_rms(model: tf.keras.Model):
         total_l2 += np.sum(weight_matrix ** 2)
         n_weights += weight_matrix.size
 
-    return total_l2 / n_weights
+    return np.sqrt(total_l2 / n_weights)
 
 
 def gradient_norm(model: tf.keras.Model, x_input):
@@ -243,3 +275,55 @@ def path_length(
         results.append(cur)
 
     return np.mean(results)
+
+
+def path_length_f_lower_bound(dataset: smooth.datasets.Dataset, use_test_set=True):
+    """
+    Calculates what the lowest achievable `path_length_f` is for a given dataset.
+    This is the expected value of the difference of two output points y1, y2.
+    """
+    y = dataset.y_test if use_test_set else dataset.y_train
+
+    # Currently we can only do scalar outputs.
+    assert y.shape[1:] == (1,)
+
+    y = np.sort(y.reshape(-1))
+    dy = np.diff(y, axis=0)
+
+    # For datasets where the output is scalar, we can compute this in O(n log n):
+    # We imagine the points on the real line and draw a line segment between every
+    # pair of points. We want to calculate the total length of these line segments.
+    # Notice that the number of segments which cross the segment between y[i] and y[i+1]
+    # is (# points on the left) * (# points on the right). Thus we can calculate
+    # the total length by weighting the first difference by these coefficients.
+    n = len(y)
+    w = np.arange(1, n) * (n - np.arange(1, n))
+
+    return 2 * (dy * w).sum() / (n ** 2)
+
+
+class SklearnModel:
+    """
+    Wraps a scikit-learn model and pretends it's a Keras model. This is useful
+    for evaluating our measures.
+    """
+
+    def __init__(self, clf):
+        self.clf = clf
+
+    def predict(self, x, batch_size=None):
+        # batch_size is a fake argument which is ignored
+        return self.clf.predict(x)
+
+
+class GPModel:
+    """
+    Wraps a GPy model and pretends it's a Keras model. This is useful
+    for evaluating our measures.
+    """
+
+    def __init__(self, model: GPy.models.GPRegression):
+        self.model = model
+
+    def predict(self, x, batch_size=None):
+        return self.model.predict_noiseless(x)[0]

@@ -24,3 +24,26 @@ def test_gp_name_conversion():
     assert np.allclose(dataset.x_test, dataset2.x_test)
     assert np.allclose(dataset.y_train, dataset2.y_train)
     assert np.allclose(dataset.y_test, dataset2.y_test)
+
+
+def test_gp_name_conversion_noise_var():
+    seed = 123
+    lengthscale = 0.456
+    samples_train = 78
+    noise_var = datasets.GaussianProcessDataset.DEFAULT_NOISE_VAR + 1
+    dataset = datasets.GaussianProcessDataset(
+        seed=seed, samples_train=samples_train, lengthscale=lengthscale,
+        noise_var=noise_var
+    )
+
+    name = dataset.name
+    for x in [seed, lengthscale, samples_train, noise_var]:
+        assert str(x) in name
+
+    dataset2 = datasets.GaussianProcessDataset.from_name(name)
+    assert dataset2.name == name
+
+    assert np.allclose(dataset.x_train, dataset2.x_train)
+    assert np.allclose(dataset.x_test, dataset2.x_test)
+    assert np.allclose(dataset.y_train, dataset2.y_train)
+    assert np.allclose(dataset.y_test, dataset2.y_test)

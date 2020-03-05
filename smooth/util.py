@@ -45,6 +45,7 @@ class NumpyRandomSeed:
     A context manager for temporarily setting a Numpy seed.
     If None is passed, the generator is not reseeded (the old RNG state is respected).
     """
+    # TODO: this can be achieved more idiomatically using numpy's RandomState
 
     def __init__(self, seed):
         self.seed = seed

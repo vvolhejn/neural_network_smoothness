@@ -11,6 +11,7 @@ import pandas as pd
 import scipy.stats
 import tqdm.notebook
 import seaborn as sns
+import GPy
 
 import smooth.datasets
 
@@ -251,3 +252,34 @@ def make_palette(values):
     values = sorted(values)
     pal = dict(zip(values, sns.cubehelix_palette(len(values))))
     return pal
+
+
+def get_gp_measures(dataset_names):
+    """
+    Compute "ground truth" measures for given GP datasets. This works by using the GP
+    itself as a model. Also computes lower bounds on `path_length_f`, which can be
+    computed from the outputs alone.
+    """
+    ms_gp_l = []
+    for dataset_name in tqdm.notebook.tqdm(dataset_names):
+        dataset = smooth.datasets.from_name(dataset_name)
+
+        # dataset.gp_model.set_XY(dataset.x_train, dataset.y_train)
+        gp = GPy.models.GPRegression(dataset.x_train, dataset.y_train, noise_var=0.0)
+        model = smooth.measures.GPModel(gp)
+
+        m = smooth.measures.get_measures_no_gradient(model, dataset)
+        m.update(
+            dim=dataset.dim,
+            seed=dataset.seed,
+            samples_train=dataset.samples_train,
+            lengthscale=dataset.lengthscale,
+            path_length_f_bound=smooth.measures.path_length_f_lower_bound(dataset),
+            path_length_f_train_bound=smooth.measures.path_length_f_lower_bound(
+                dataset, use_test_set=False
+            ),
+        )
+        ms_gp_l.append(m)
+
+    ms_gp = pd.DataFrame(ms_gp_l)
+    return ms_gp

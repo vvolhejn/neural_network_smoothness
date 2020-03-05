@@ -162,17 +162,25 @@ def from_name(name):
         return ds
 
 
+def from_params(name, **kwargs):
+    if name == "gp":
+        return GaussianProcessDataset(**kwargs)
+
+
 # _gp_cache = {}
 
 class GaussianProcessDataset(Dataset):
+    DEFAULT_NOISE_VAR = 0.001
+
     def __init__(
         self,
         samples_train: int,
         lengthscale: float,
         seed=None,
         dim=1,
-        # noise_var=0.01,
+        noise_var=DEFAULT_NOISE_VAR,
         plot=False,
+        disjoint=False,
     ):
         self.samples_train = samples_train
         self.lengthscale = lengthscale
@@ -181,14 +189,15 @@ class GaussianProcessDataset(Dataset):
             seed = np.random.randint(int(1e4))
         self.seed = seed
         self.dim = dim
-        noise_var = 0.001
+        self.noise_var = noise_var
+        self.disjoint = disjoint
         x_min, x_max = -1, 1
 
         gp_model = GPy.models.GPRegression(
             # It seems the constructor needs at least 1 data point.
             np.array([[(x_min + x_max) / 2] * dim]),
             np.array([[0]]),
-            noise_var=noise_var,
+            noise_var=self.noise_var,
         )
         gp_model.kern.lengthscale = lengthscale
         # 0.1 * (x_max - x_min)
@@ -210,11 +219,15 @@ class GaussianProcessDataset(Dataset):
                 y_test = gp_model.posterior_samples_f(x_test, size=1)[:, :, 0]
 
             gp_model.set_XY(x_test, y_test)
-            assert samples_train <= samples_test
-            # Subsampling regularly is pointless for unordered samples,
-            # but it does no harm
-            indices = smooth.util.subsample_regularly(samples_test, samples_train)
-            x_train = x_test[indices]
+            if self.disjoint:
+                x_train = np.random.randn(samples_train, dim)
+            else:
+                assert samples_train <= samples_test
+                # Subsampling regularly is pointless for unordered samples,
+                # but it does no harm
+                indices = smooth.util.subsample_regularly(samples_test, samples_train)
+                x_train = x_test[indices]
+
             y_train = gp_model.posterior_samples_f(x_train, size=1)[:, :, 0]
 
         if plot:
@@ -225,36 +238,34 @@ class GaussianProcessDataset(Dataset):
         super().__init__(x_train, y_train, x_test, y_test, name=self.get_name())
 
     def get_name(self):
-        return "gp-{}-{}-{}-{}".format(
+        res = "gp-{}-{}-{}-{}".format(
             self.dim, self.seed, self.lengthscale, self.samples_train
         )
+        if self.disjoint or self.noise_var != GaussianProcessDataset.DEFAULT_NOISE_VAR:
+            res += "-{}".format(self.noise_var)
+        if self.disjoint:
+            res += "-1"
+
+        return res
 
     @staticmethod
     def from_name(name):
         # MAX_SAMPLES = 1000
         parts = name.split("-")
-        gp, dim, seed, lengthscale, samples_train = parts
+        gp, dim, seed, lengthscale, samples_train = parts[:5]
         assert gp == "gp"
-        # assert int(samples_train) <= MAX_SAMPLES
-        #
-        # sig = (dim, seed, lengthscale)
-        # if sig not in _gp_cache:
-        #     res = GaussianProcessDataset(
-        #         dim=int(dim),
-        #         seed=int(seed),
-        #         lengthscale=float(lengthscale),
-        #         samples_train=MAX_SAMPLES,
-        #     )
-        #     _gp_cache[sig] = res
-        #     logging.debug("Stored {} into cache".format(name))
-        # else:
-        #     logging.debug("Using cache for {}".format(name))
-        #
-        # return _gp_cache[sig].subset(int(samples_train), keep_test_set=True)
+        noise_var = GaussianProcessDataset.DEFAULT_NOISE_VAR
+        if len(parts) > 5:
+            noise_var = parts[5]
+        if len(parts) > 6:
+            assert len(parts) == 7
+            disjoint = parts[6]
 
         return GaussianProcessDataset(
             dim=int(dim),
             seed=int(seed),
             lengthscale=float(lengthscale),
             samples_train=int(samples_train),
+            noise_var=float(noise_var),
+            disjoint=bool(int(disjoint)),
         )

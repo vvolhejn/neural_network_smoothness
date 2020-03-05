@@ -29,22 +29,24 @@ def config():
     dry_run = False
 
     if GP:
-        processes = 8
-        learning_rates = [0.003]
-        init_scales = [1.0]
+        processes = 20
+        learning_rates = [0.1, 0.01, 0.001]
+        init_scales = [10.0, 1.0, 0.1]
         # hidden_sizes = [1, 2, 4, 8, 16, 32]
-        hidden_sizes = [64]
+        hidden_sizes = [4, 16, 64]
         epochs = 100000
         batch_sizes = [64]
 
-        iterations = 3
+        iterations = 1
         datasets = [
-            "gp-{}-{}-{}-{}".format(dim, seed, lengthscale * float(dim), samples_train)
-            for (dim, seed, lengthscale, samples_train) in itertools.product(
-                [2 ** x for x in range(1, 10)],
-                range(1, 4),
-                [0.3, 1.0],
+            "gp-{}-{}-{}-{}-0-{}".format(dim, seed, lengthscale * float(dim), samples_train, disjoint)
+            for (dim, seed, lengthscale, samples_train, disjoint) in itertools.product(
+                [2 ** x for x in range(1, 10, 2)],
+                range(1, 2),
+                [1.0],
+                # [0.3, 1.0],
                 np.logspace(np.log10(10), np.log10(1000), 10).round().astype(int),
+                range(2),
             )
         ]
         loss_threshold = 1e-5
@@ -151,7 +153,7 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
 
     res["log_dir"] = model.log_dir
     measures = smooth.measures.get_measures(
-        model, dataset.x_test, dataset.y_test, samples=1000
+        model, dataset, samples=1000
     )
     res.update(measures)
     print("Finished model training of", model.id)

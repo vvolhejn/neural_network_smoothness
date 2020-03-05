@@ -59,42 +59,7 @@ class Hyperparams:
         return str(vars(self))
 
 
-class SklearnModel:
-    """
-    A class that wraps a scikit-learn model and pretends it's a Keras model. This is
-    useful for evaluating our measures.
-    """
-
-    def __init__(self, clf):
-        self.clf = clf
-
-    def predict(self, x, batch_size=None):
-        # batch_size is a fake argument which is ignored
-        return self.clf.predict(x)
-
-
-def measure_krr(krr: sklearn.kernel_ridge.KernelRidge, dataset):
-    import smooth.measures
-
-    train_loss = sklearn.metrics.mean_squared_error(
-        krr.predict(dataset.x_train), dataset.y_train
-    )
-    test_loss = sklearn.metrics.mean_squared_error(
-        krr.predict(dataset.x_test), dataset.y_test
-    )
-    model = SklearnModel(krr)
-    path_length_f_train = smooth.measures.path_length(model, dataset.x_train)
-    path_length_f_test = smooth.measures.path_length(model, dataset.x_test)
-
-    return {
-        "train_loss": train_loss,
-        "test_loss": test_loss,
-        "path_length_f_train": path_length_f_train,
-        "path_length_f_test": path_length_f_test,
-    }
-
-
-def train_model(hparams: Hyperparams, verbose: int = 0, dataset_cache={}):
+def train_model(hparams: Hyperparams, verbose: int = 0):
     import os
     import smooth.util
 
@@ -116,25 +81,10 @@ def train_model(hparams: Hyperparams, verbose: int = 0, dataset_cache={}):
     krr = sklearn.kernel_ridge.KernelRidge(kernel="poly", coef0=1, **kwargs)
     krr.fit(dataset.x_train, dataset.y_train)
     res = vars(hparams).copy()
-    measures = measure_krr(krr, dataset)
+    measures = smooth.measures.measure_krr(krr, dataset)
     res.update(measures)
     print("Finished model training of", hparams)
     print("   ", res)
-    return res
-
-
-def train_models(hparams_list: List[Hyperparams], verbose: int = 0):
-    dataset_cache = {}
-    dataset_names = set(
-        "-".join(hparams.dataset.split("-")[:-1]) for hparams in hparams_list
-    )
-    for d in dataset_names:
-        d2 = d + "-1000"
-        dataset_cache[d] = smooth.datasets.from_name(d2)
-
-    res = []
-    for hparams in hparams_list:
-        res.append(train_model(hparams, dataset_cache=dataset_cache))
     return res
 
 
