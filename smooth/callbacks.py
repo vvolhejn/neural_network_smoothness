@@ -51,7 +51,6 @@ class Measures(tf.keras.callbacks.Callback):
             self.model,
             self.x_val,
             self.y_val,
-            include_training_measures=False,
             samples=self.samples,
         )
 

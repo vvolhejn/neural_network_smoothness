@@ -1,7 +1,9 @@
 """
 Functions for analysis in Jupyter Notebooks.
 """
-from typing import List
+from typing import List, Callable
+import os
+import logging
 
 import tensorflow as tf
 import numpy as np
@@ -187,9 +189,9 @@ def expand_dataset_columns(df: pd.DataFrame):
     If not all datasets are `GaussianProcessDataset`s, returns `df` unchanged.
     """
     dataset_cols = df["dataset"].str.split("-", expand=True)
-    # dataset_cols.iloc[0, 0] != "gp" or
+
     if dataset_cols[0].nunique() > 1:
-        # Not all datasets are gp datasets - do nothing
+        # Not all datasets are of the same kind - do nothing
         return df
 
     dataset_name = dataset_cols.iloc[0, 0]
@@ -197,27 +199,28 @@ def expand_dataset_columns(df: pd.DataFrame):
 
     prefix = ""
     if dataset_name == "gp":
-        # Naming format: gp-{dim}-{seed}-{lengthscale}-{samples_train}
-        dataset_cols.columns = [
-            prefix + "dim",
-            prefix + "seed",
-            prefix + "lengthscale",
-            prefix + "samples_train",
+        # Naming format:
+        # gp-{dim}-{seed}-{lengthscale}-{samples_train}[-{noise_var}[-{disjoint}]]
+        params = [
+            ("dim", np.int32),
+            ("seed", np.int32),
+            ("lengthscale", np.float32),
+            ("samples_train", np.int32),
+            ("noise_var", np.float32),
+            ("disjoint", np.int32),
         ]
-        dataset_cols = dataset_cols.astype(
-            {
-                prefix + "dim": np.int32,
-                prefix + "seed": np.int32,
-                prefix + "lengthscale": np.float32,
-                prefix + "samples_train": np.int32,
-            }
-        )
+        dataset_cols.columns = [prefix + name for name, _ in params][
+                               : len(dataset_cols.columns)
+                               ]
+
+        for name, t in params:
+            if name in dataset_cols.columns:
+                dataset_cols = dataset_cols.astype({prefix + name: t})
     else:
         dataset_cols.columns = [prefix + "samples_train"]
         dataset_cols = dataset_cols.astype({prefix + "samples_train": np.int32})
 
     res = df.join(dataset_cols)
-    # del res["dataset"]
     return res
 
 
@@ -264,9 +267,9 @@ def get_gp_measures(dataset_names):
     for dataset_name in tqdm.notebook.tqdm(dataset_names):
         dataset = smooth.datasets.from_name(dataset_name)
 
-        # dataset.gp_model.set_XY(dataset.x_train, dataset.y_train)
-        gp = GPy.models.GPRegression(dataset.x_train, dataset.y_train, noise_var=0.0)
-        model = smooth.measures.GPModel(gp)
+        dataset.gp_model.set_XY(dataset.x_train, dataset.y_train)
+        # gp = GPy.models.GPRegression(dataset.x_train, dataset.y_train, noise_var=0.0)
+        model = smooth.measures.GPModel(dataset.gp_model)
 
         m = smooth.measures.get_measures_no_gradient(model, dataset)
         m.update(
@@ -274,7 +277,11 @@ def get_gp_measures(dataset_names):
             seed=dataset.seed,
             samples_train=dataset.samples_train,
             lengthscale=dataset.lengthscale,
-            path_length_f_bound=smooth.measures.path_length_f_lower_bound(dataset),
+            noise_var=int(dataset.noise_var),
+            disjoint=dataset.disjoint,
+            path_length_f_test_bound=smooth.measures.path_length_f_lower_bound(
+                dataset, use_test_set=True,
+            ),
             path_length_f_train_bound=smooth.measures.path_length_f_lower_bound(
                 dataset, use_test_set=False
             ),
@@ -283,3 +290,14 @@ def get_gp_measures(dataset_names):
 
     ms_gp = pd.DataFrame(ms_gp_l)
     return ms_gp
+
+
+def compute_or_load_df(
+    compute_f: Callable[[], pd.DataFrame], path: str, always_compute=False
+):
+    if os.path.isfile(path) and not always_compute:
+        return pd.read_feather(path)
+    else:
+        res = compute_f()
+        res.to_feather(path)
+        return res

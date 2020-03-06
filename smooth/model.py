@@ -6,13 +6,13 @@ import warnings
 
 import numpy as np
 import tensorflow as tf
-
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.initializers import VarianceScaling
+import GPy
+import sklearn.kernel_ridge
 
 import smooth.datasets
-import smooth.measures
 import smooth.callbacks
 
 assert tf.__version__[0] == "2"
@@ -87,13 +87,12 @@ def train_shallow(
     init_scale,
     hidden_size=200,
     epochs=1000,
-    batch_size=512,
+    batch_size=None,
     iteration=None,
     verbose=0,
     loss_threshold=0.0,
     log_dir=None,
     callbacks: List[tf.keras.callbacks.Callback] = [],
-    train_val_split=0.9,
     activation="relu",
 ):
     """
@@ -104,22 +103,19 @@ def train_shallow(
     :param init_scale:
     :param hidden_size:
     :param epochs:
-    :param batch_size:
+    :param batch_size: If None, will perform GD rather than SGD.
     :param iteration: Used only as an additional identifier
         (for training multiple models with the same hyperparams)
     :param verbose: Verbosity level passed to `model.fit`
     :param loss_threshold: Stop training when this loss is reached.
     :param log_dir: Where to save Tensorboard logs. If None, Tensorboard is not used.
     :param callbacks: list of tf.keras.Callback functions
-    :param train_val_split: 0.9 = use 90% for training, 10% for validation
     :param activation: activation function for the hidden layer
     :return: A trained model.
     """
     model = get_shallow(dataset, learning_rate, init_scale, hidden_size, activation)
 
-    x_train, y_train, x_val, y_val = split_dataset(
-        dataset.x_train, dataset.y_train, train_val_split
-    )
+    x_train, y_train = dataset.x_train, dataset.y_train
 
     # How many times do we want to validate and call and the Tensorboard callback
     n_updates = 100
@@ -150,21 +146,20 @@ def train_shallow(
         )
         file_writer.set_as_default()
 
-        measures_cb = smooth.callbacks.Measures(dataset.x_test, dataset.y_test)
+        # measures_cb = smooth.callbacks.Measures(dataset.x_test, dataset.y_test)
         tensorboard_cb = smooth.callbacks.TensorBoard(model.log_dir, validation_freq)
 
-        callbacks += [tensorboard_cb, measures_cb]
+        callbacks += [tensorboard_cb]
 
     model.fit(
         x_train,
         y_train,
         epochs=epochs,
         shuffle=True,
-        batch_size=batch_size,
+        batch_size=batch_size or len(x_train),  # None -> use GD, not SGD
         verbose=verbose,
         callbacks=callbacks,
-        # The case `len(x_val) == 0` occurs if `validation_split == 1.0`
-        validation_data=(x_val, y_val) if len(x_val) > 0 else None,
+        validation_data=(dataset.x_test, dataset.y_test),
         validation_freq=validation_freq,  # evaluate once every <validation_freq> epochs
     )
 
@@ -239,3 +234,70 @@ def interpolate_polynomial(dataset: smooth.datasets.Dataset, deg=None):
     poly_dataset = smooth.datasets.Dataset(dataset.x_test, y_pred, [], [])
     model = smooth.model.interpolate_relu_network(poly_dataset)
     return model
+
+
+class SklearnModel:
+    """
+    Wraps a scikit-learn model and pretends it's a Keras model. This is useful
+    for evaluating our measures.
+    """
+
+    def __init__(self, clf):
+        self.clf = clf
+        self.differentiable = False
+
+    def predict(self, x, **kwargs):
+        # Silently ignores other arguments meant for Keras models
+        return self.clf.predict(x)
+
+
+class GPModel:
+    """
+    Wraps a GPy model and pretends it's a Keras model. This is useful
+    for evaluating our measures.
+    """
+
+    def __init__(self, model: GPy.models.GPRegression):
+        self.model = model
+        self.differentiable = False
+
+    def predict(self, x, **kwargs):
+        # Silently ignores other arguments meant for Keras models
+        return self.model.predict_noiseless(x)[0]
+
+
+def is_differentiable(model: tf.keras.Model):
+    """
+    We are duck-typing non-Keras models, such as sklearn models. This means that we
+    might not be able to take the model's gradient.
+    """
+    if not hasattr(model, "differentiable"):
+        return True
+    else:
+        return model.differentiable
+
+
+def train_model(name, dataset, **kwargs):
+    if name == "krr":
+        krr = sklearn.kernel_ridge.KernelRidge(kernel="poly", coef0=1, **kwargs)
+        krr.fit(dataset.x_train, dataset.y_train)
+        return SklearnModel(krr), {}
+    elif name == "shallow":
+        if kwargs["batch_size"] is None:
+            # Batch size == None -> use GD (batch size is the training set's size)
+            kwargs["batch_size"] = len(dataset.x_train)
+
+        model = smooth.model.train_shallow(
+            dataset=dataset,
+            callbacks=[
+                tf.keras.callbacks.EarlyStopping(
+                    monitor="loss", patience=10000, min_delta=1e-5
+                )
+            ],
+            **kwargs,
+        )
+
+        model.save(os.path.join(model.log_dir, "model.h5"))
+        return model, {"log_dir": model.log_dir}
+    else:
+        raise ValueError("Unknown model name: {}".format(name))

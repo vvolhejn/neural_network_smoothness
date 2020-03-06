@@ -1,0 +1,29 @@
+name: smooth
+
+cpus: 20
+max_time: 1:00:00
+memory_gb: 16
+# What information should SLURM send about the job via email? (see docs)
+mail_type: END
+debug: False
+
+hyperparams_grid:
+    - dataset.name: gp
+
+    - dataset.dim: [2, 8, 32, 128, 512, 2048]
+    - dataset.lengthscale_coef: [1.0, 0.3]
+    - dataset.seed: [1]
+    - dataset.samples_train: [10, 17, 28, 46, 77, 129, 215, 359, 599, 1000]
+    - dataset.disjoint: true
+    - dataset.noise_var: 0.
+
+    - model.name: shallow
+    - model.hidden_size: [4, 16, 64, 256]
+    - model.epochs: 100000
+    - model.batch_size: 64
+    - model.iteration: [0, 1, 2]
+
+    - model.learning_rate: [0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001, 0.00003]
+      model.init_scale:    [0.1, 0.1,  1.0,  1.0,   10.0,  10.0,   100.0,  100.0]
+
+

@@ -164,10 +164,14 @@ def from_name(name):
 
 def from_params(name, **kwargs):
     if name == "gp":
+        if "lengthscale_coef" in kwargs:
+            kwargs["lengthscale"] = kwargs["lengthscale_coef"] * kwargs["dim"]
+            del kwargs["lengthscale_coef"]
+
         return GaussianProcessDataset(**kwargs)
+    else:
+        raise NotImplementedError
 
-
-# _gp_cache = {}
 
 class GaussianProcessDataset(Dataset):
     DEFAULT_NOISE_VAR = 0.001
@@ -255,6 +259,8 @@ class GaussianProcessDataset(Dataset):
         gp, dim, seed, lengthscale, samples_train = parts[:5]
         assert gp == "gp"
         noise_var = GaussianProcessDataset.DEFAULT_NOISE_VAR
+        disjoint = False
+
         if len(parts) > 5:
             noise_var = parts[5]
         if len(parts) > 6:

@@ -7,6 +7,7 @@ import sklearn.kernel_ridge
 import GPy
 
 import smooth.datasets
+import smooth.model
 
 
 def get_measures(
@@ -21,71 +22,29 @@ def get_measures(
     x_train, y_train = dataset.x_train, dataset.y_train
     x_test, y_test = dataset.x_test, dataset.y_test
 
-    # For metrics recorded by keras itself, such as loss, accuracy/mae
+    if is_classification:
+        # TODO: use cross-entropy loss for classification
+        raise NotImplementedError
+
     for name, x, y in [
         ("train", x_train, y_train),
         ("test", x_test, y_test),
     ]:
-        tf_metrics = dict(
-            zip(
-                model.metrics_names,
-                model.evaluate(x[:samples], y[:samples], batch_size=256, verbose=0),
+        try:
+            y_pred = model.predict(x[:samples], batch_size=64)
+
+            res["loss_{}".format(name)] = sklearn.metrics.mean_squared_error(
+                y[:samples],
+                y_pred
             )
-        )
+        except ValueError as e:
+            return {"error": str(e)}
 
-        # This might happen if the learning rate or init scale is too high
-        if not np.isfinite(tf_metrics["loss"]):
-            return res
-
-        for k, v in tf_metrics.items():
-            res["{}_{}".format(k, name)] = v
-
-    res["gradient_norm"] = gradient_norm(model, x_test[:samples])
-    res["weights_rms"] = weights_rms(model)
-
-    is_1d = x_test[0].squeeze().shape == () and y[0].squeeze().shape == ()
-
-    if is_1d and precise_in_1d:
-        # 1D case - we can solve this deterministically
-        x_min, x_max = np.min(x_test, axis=0), np.max(x_test, axis=0)
-        path_length_f = path_length_one_sample(
-            model, x_min, x_max, n_samples=samples, derivative=False,
-        )
-        path_length_d = path_length_one_sample(
-            model, x_min, x_max, n_samples=samples, derivative=True,
-        )
-    else:
-        for suffix, x in [("_train", x_train), ("_test", x_test)]:
-            path_length_f = path_length(
-                model, x, segments_per_batch=100, segments=samples
-            )
-            path_length_d = path_length(
-                model, x, derivative=True, segments_per_batch=10, segments=samples,
-            )
-            res.update(
-                {
-                    "path_length_f" + suffix: path_length_f,
-                    "path_length_d" + suffix: path_length_d,
-                }
-            )
-            if is_classification:
-                path_length_f_softmax = path_length(
-                    model, x, segments_per_batch=100, segments=samples, softmax=True,
-                )
-                path_length_d_softmax = path_length(
-                    model,
-                    x,
-                    derivative=True,
-                    segments_per_batch=10,
-                    segments=samples,
-                    softmax=True,
-                )
-                res.update(
-                    {
-                        "path_length_f_softmax" + suffix: path_length_f_softmax,
-                        "path_length_d_softmax" + suffix: path_length_d_softmax,
-                    }
-                )
+    if smooth.model.is_differentiable(model):
+        res["gradient_norm"] = gradient_norm(model, x_test[:samples])
+        # Technically, we need a keras model for this.
+        # But for now differentiable == keras
+        res["weights_rms"] = weights_rms(model)
 
     try:
         res["actual_epochs"] = len(model.history.history["loss"])
@@ -94,33 +53,46 @@ def get_measures(
         # and `model.history` does not exist.
         pass
 
+    is_1d = x_test[0].squeeze().shape == () and y[0].squeeze().shape == ()
+
+    if is_1d and precise_in_1d:
+        # 1D case - we can solve this deterministically
+        x_min, x_max = np.min(x_test, axis=0), np.max(x_test, axis=0)
+        res["path_length_f_test"] = path_length_one_sample(
+            model, x_min, x_max, n_samples=samples, derivative=False,
+        )
+
+        if smooth.model.is_differentiable(model):
+            res["path_length_d_test"] = path_length_one_sample(
+                model, x_min, x_max, n_samples=samples, derivative=True,
+            )
+    else:
+        for suffix, x in [("_train", x_train), ("_test", x_test)]:
+            res["path_length_f" + suffix] = path_length(
+                model, x, segments_per_batch=100, segments=samples
+            )
+
+            if smooth.model.is_differentiable(model):
+                res["path_length_d" + suffix] = path_length(
+                    model, x, derivative=True, segments_per_batch=10, segments=samples,
+                )
+
+            if is_classification:
+                res["path_length_f_softmax" + suffix] = path_length(
+                    model, x, segments_per_batch=100, segments=samples, softmax=True,
+                )
+
+                if smooth.model.is_differentiable(model):
+                    res["path_length_d_softmax" + suffix] = path_length(
+                        model,
+                        x,
+                        derivative=True,
+                        segments_per_batch=10,
+                        segments=samples,
+                        softmax=True,
+                    )
+
     return res
-
-
-def get_measures_no_gradient(model, dataset: smooth.datasets.Dataset):
-    """
-    model should have a model.predict(x) method.
-    """
-
-    train_loss = sklearn.metrics.mean_squared_error(
-        model.predict(dataset.x_train), dataset.y_train
-    )
-    test_loss = sklearn.metrics.mean_squared_error(
-        model.predict(dataset.x_test), dataset.y_test
-    )
-    path_length_f_train = smooth.measures.path_length(
-        model, dataset.x_train, segments_per_batch=100
-    )
-    path_length_f_test = smooth.measures.path_length(
-        model, dataset.x_test, segments_per_batch=100
-    )
-
-    return {
-        "train_loss": train_loss,
-        "test_loss": test_loss,
-        "path_length_f_train": path_length_f_train,
-        "path_length_f": path_length_f_test,
-    }
 
 
 def weights_rms(model: tf.keras.Model):
@@ -300,30 +272,3 @@ def path_length_f_lower_bound(dataset: smooth.datasets.Dataset, use_test_set=Tru
     w = np.arange(1, n) * (n - np.arange(1, n))
 
     return 2 * (dy * w).sum() / (n ** 2)
-
-
-class SklearnModel:
-    """
-    Wraps a scikit-learn model and pretends it's a Keras model. This is useful
-    for evaluating our measures.
-    """
-
-    def __init__(self, clf):
-        self.clf = clf
-
-    def predict(self, x, batch_size=None):
-        # batch_size is a fake argument which is ignored
-        return self.clf.predict(x)
-
-
-class GPModel:
-    """
-    Wraps a GPy model and pretends it's a Keras model. This is useful
-    for evaluating our measures.
-    """
-
-    def __init__(self, model: GPy.models.GPRegression):
-        self.model = model
-
-    def predict(self, x, batch_size=None):
-        return self.model.predict_noiseless(x)[0]
