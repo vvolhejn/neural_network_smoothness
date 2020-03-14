@@ -7,21 +7,31 @@ import numpy as np
 
 
 class Config:
-    KEYS = ["name", "cpus", "max_time", "memory_gb", "mail_type", "debug"]
+    KEYS = ["name", "cpus", "max_time", "memory_gb", "mail_type", "debug", "confirm"]
     KEYS_SPECIAL = ["hyperparams_grid"]
 
     def __init__(self, config_file):
         self.config_file = config_file
         with open(config_file, "r") as f:
             data = yaml.safe_load(f)
+            self.raw_config = data
 
             self.hyperparams_grid = HyperparamsGrid(data["hyperparams_grid"])
-            for k in Config.KEYS:
-                vars(self)[k] = data[k]
+
+            self.name = data["name"]
+            self.cpus = data["cpus"]
+            self.max_time = data["max_time"]
+            self.memory_gb = data["memory_gb"]
+            self.mail_type = data["mail_type"]
+            self.debug = data["debug"]
+            self.confirm = data.get("confirm", True)
 
             for k in data:
                 if k not in Config.KEYS + Config.KEYS_SPECIAL:
                     raise ValueError("Unknown key in config file: {}".format(k))
+
+    def __repr__(self):
+        return yaml.safe_dump(self.raw_config)
 
 
 class HyperparamsGrid:
@@ -58,7 +68,6 @@ class HyperparamsGrid:
             axis[key] = values
 
         self.axes.append(axis)
-
 
     def iterator(self):
         return (

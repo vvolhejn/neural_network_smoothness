@@ -16,6 +16,8 @@ import seaborn as sns
 import GPy
 
 import smooth.datasets
+import smooth.model
+import smooth.measures
 
 
 def get_kendall_coefs(
@@ -164,14 +166,14 @@ def plot_shallow(
         return animation
 
 
-def remove_constant_columns(df: pd.DataFrame, verbose=False):
+def remove_constant_columns(df: pd.DataFrame, verbose=False, to_keep: List[str]=[]):
     """
     Removes those columns of a DataFrame which are equal across all rows.
     The DF is modified in-place and also returned.
     """
     removed = []
     for col in df.columns:
-        if df[col].nunique(dropna=False) == 1:
+        if col not in to_keep and df[col].nunique(dropna=False) == 1:
             removed.append(col)
             del df[col]
 
@@ -210,8 +212,8 @@ def expand_dataset_columns(df: pd.DataFrame):
             ("disjoint", np.int32),
         ]
         dataset_cols.columns = [prefix + name for name, _ in params][
-                               : len(dataset_cols.columns)
-                               ]
+            : len(dataset_cols.columns)
+        ]
 
         for name, t in params:
             if name in dataset_cols.columns:
@@ -253,25 +255,35 @@ def get_interpolation_measures(dataset_names, use_test_set=False, use_polynomial
 
 def make_palette(values):
     values = sorted(values)
-    pal = dict(zip(values, sns.cubehelix_palette(len(values))))
+    pal = dict(zip(values, sns.cubehelix_palette(len(values), light=0.75)))
     return pal
 
 
-def get_gp_measures(dataset_names):
+def get_gp_measures(datasets, from_params=False, kernel_f=None, lengthscale_coef=1.):
     """
     Compute "ground truth" measures for given GP datasets. This works by using the GP
     itself as a model. Also computes lower bounds on `path_length_f`, which can be
     computed from the outputs alone.
     """
+
     ms_gp_l = []
-    for dataset_name in tqdm.notebook.tqdm(dataset_names):
-        dataset = smooth.datasets.from_name(dataset_name)
+    for dataset_id in tqdm.notebook.tqdm(datasets):
+        if from_params:
+            dataset = smooth.datasets.from_params(**dataset_id)
+        else:
+            dataset = smooth.datasets.from_name(dataset_id)
 
-        dataset.gp_model.set_XY(dataset.x_train, dataset.y_train)
-        # gp = GPy.models.GPRegression(dataset.x_train, dataset.y_train, noise_var=0.0)
-        model = smooth.measures.GPModel(dataset.gp_model)
+        kernel = kernel_f(input_dim=dataset.x_shape()[0]) if kernel_f else None
+        gp = GPy.models.GPRegression(
+            dataset.x_train,
+            dataset.y_train,
+            noise_var=0.,
+            kernel=kernel,
+        )
+        gp.kern.lengthscale = dataset.lengthscale * lengthscale_coef
+        model = smooth.model.GPModel(gp)
 
-        m = smooth.measures.get_measures_no_gradient(model, dataset)
+        m = smooth.measures.get_measures(model, dataset)
         m.update(
             dim=dataset.dim,
             seed=dataset.seed,

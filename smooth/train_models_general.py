@@ -14,6 +14,16 @@ import pandas as pd
 import smooth.config
 import smooth.util
 
+
+def confirmation_prompt(config: smooth.config.Config):
+    print(config)
+    print("Hyperparam combinations: {}".format(config.hyperparams_grid.grid_size()))
+    ans = input("Begin training? (y/n)")
+    if ans not in ["y", "yes"]:
+        print("Cancelling.")
+        exit(1)
+
+
 if __name__ == "__main__":
     try:
         _config_path = os.environ["SMOOTH_CONFIG"]
@@ -24,6 +34,9 @@ if __name__ == "__main__":
         )
 
     _config = smooth.config.Config(_config_path)
+    if _config.confirm:
+        confirmation_prompt(_config)
+
     ex = sacred.Experiment(name=_config.name)
 
     if not _config.debug:
@@ -89,9 +102,11 @@ def main(_run, log_dir, config_path, dry_run):
         print("Hyperparam combinations: {}".format(config.hyperparams_grid.grid_size()))
         return
 
-    os.makedirs(log_dir)
-    shutil.copy(config_path, os.path.join(log_dir, "run_config.yaml"))
-    logging.info("Log dir: {}".format(log_dir))
+    if os.path.abspath(log_dir) != os.getcwd():
+        os.makedirs(log_dir)
+        shutil.copy(config_path, os.path.join(log_dir, "run_config.yaml"))
+
+    logging.info("Log dir: {}".format(os.path.abspath(log_dir)))
 
     config.hyperparams_grid.add_axis({"log_dir": log_dir})
     hyperparams_to_try = list(config.hyperparams_grid.iterator())

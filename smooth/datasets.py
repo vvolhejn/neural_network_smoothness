@@ -70,12 +70,15 @@ class Dataset:
         res = "'{}'".format(self.name or type(self).__name__)
 
         res += " (x.shape={}, y.shape={}, training samples={}, test samples={})".format(
-            self.x_train.shape[1:],
-            self.y_train.shape[1:],
-            len(self.x_train),
-            len(self.x_test),
+            self.x_shape(), self.y_shape(), len(self.x_train), len(self.x_test),
         )
         return res
+
+    def x_shape(self):
+        return self.x_train.shape[1:]
+
+    def y_shape(self):
+        return self.y_train.shape[1:]
 
 
 class ClassificationDataset(Dataset):
@@ -91,15 +94,18 @@ class ClassificationDataset(Dataset):
         """
 
         def random_wrong(correct):
-            """ Random ints in [0, n_classes) of shape correct.shape, where the original values are avoided """
+            """
+            Random ints in [0, n_classes) of shape correct.shape,
+            where the original values are avoided
+            """
             res = np.random.randint(self.n_classes - 1, size=correct.shape)
             res = res + (res >= correct).astype(int)
             assert not np.any(res == correct)
             return res
 
         def add_label_noise_to_one(y):
-            # Could have been implemented in a simpler way by adjusting p to account for the possibility
-            # that we generate the correct label "accidentally"
+            # Could have been implemented in a simpler way by adjusting p to account
+            # for the possibility that we generate the correct label "accidentally"
             y_wrong = random_wrong(y)
             mask = np.random.random(size=y.shape) < p
             return np.where(mask, y_wrong, y)
@@ -167,7 +173,6 @@ def from_params(name, **kwargs):
         if "lengthscale_coef" in kwargs:
             kwargs["lengthscale"] = kwargs["lengthscale_coef"] * kwargs["dim"]
             del kwargs["lengthscale_coef"]
-
         return GaussianProcessDataset(**kwargs)
     else:
         raise NotImplementedError
