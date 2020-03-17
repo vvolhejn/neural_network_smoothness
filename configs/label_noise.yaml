@@ -1,0 +1,25 @@
+name: smooth_label_noise
+
+cpus: 20
+max_time: "24:00:00"
+memory_gb: 64
+# What information should SLURM send about the job via email? (see docs)
+mail_type: END
+debug: False
+
+hyperparams_grid:
+    - dataset.name: mnistparity
+#    - dataset.samples_train: [10, 17, 28, 46, 77, 129, 215, 359, 599, 1000]
+    - dataset.samples_train: [1000]
+    - dataset.label_noise:
+        [0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25, 0.3 , 0.35, 0.4 , 0.45, 0.5 ,
+         0.55, 0.6 , 0.65, 0.7 , 0.75, 0.8 , 0.85, 0.9 , 0.95, 1.  ]
+
+    - model.name: shallow
+    - model.hidden_size: [64]
+    - model.epochs: 20000
+    - model.batch_size: 64
+    - model.iteration: [0, 1, 2, 3, 4]
+    - model.learning_rate: [0.01]
+      model.init_scale:    [1.0 ]
+    - model.loss_threshold: 1.e-5

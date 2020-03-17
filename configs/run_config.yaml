@@ -1,0 +1,22 @@
+name: smooth_mean
+
+cpus: 20
+max_time: "24:00:00"
+memory_gb: 64
+# What information should SLURM send about the job via email? (see docs)
+mail_type: END
+debug: False
+
+hyperparams_grid:
+    - dataset.name: mnistmean
+#    - dataset.samples_train: [10, 17, 28, 46, 77, 129, 215, 359, 599, 1000]
+    - dataset.samples_train: [60, 86, 124, 179, 257, 370, 532, 765, 1100, 1582, 2276, 3273, 4709, 6773, 9743, 14014, 20159, 28998, 41712, 60000]
+
+    - model.name: shallow
+    - model.hidden_size: [16, 64]
+    - model.epochs: 20000
+    - model.batch_size: 64
+    - model.iteration: [0]
+    - model.learning_rate: [0.01]
+    - model.init_scale:    [1.0  ]
+    - model.loss_threshold: 1.e-5
