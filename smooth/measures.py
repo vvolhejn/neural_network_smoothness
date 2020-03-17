@@ -96,13 +96,13 @@ def get_measures(
 
 
 def weights_rms(model: tf.keras.Model):
-    total_l2 = 0
+    total = 0
     n_weights = 0
     for weight_matrix in model.get_weights():
-        total_l2 += np.sum(weight_matrix ** 2)
+        total += np.sum(weight_matrix ** 2)
         n_weights += weight_matrix.size
 
-    return np.sqrt(total_l2 / n_weights)
+    return np.sqrt(total / n_weights)
 
 
 def gradient_norm(model: tf.keras.Model, x_input):

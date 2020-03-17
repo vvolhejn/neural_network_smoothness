@@ -90,7 +90,7 @@ def plot_shallow(
     """
     xlim = pad_bounds(dataset.x_train.min(), dataset.x_train.max(), 0.25)
     ylim = pad_bounds(dataset.y_train.min(), dataset.y_train.max(), 0.5)
-    x = np.linspace(xlim[0], xlim[1], 101)
+    x = np.linspace(xlim[0], xlim[1], 101, dtype=np.float32)
 
     ax, ax_hist = None, None  # type: plt.Axes
     fig, (ax, ax_hist) = plt.subplots(
@@ -135,7 +135,8 @@ def plot_shallow(
     def update(weights, epoch=None):
         old_weights = model.get_weights()
         model.set_weights(weights)
-        y = model.predict(x)
+        # y = model.predict(x)
+        y = model(x)
         prediction_line.set_data(x, y)
 
         kinks_x, kinks_y = get_kinks(weights, xlim[0], xlim[1])

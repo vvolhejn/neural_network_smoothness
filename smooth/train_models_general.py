@@ -17,8 +17,7 @@ import smooth.util
 
 def confirmation_prompt(config: smooth.config.Config):
     print(config)
-    print("Hyperparam combinations: {}".format(config.hyperparams_grid.grid_size()))
-    ans = input("Begin training? (y/n)")
+    ans = input("Begin training? (y/n): ")
     if ans not in ["y", "yes"]:
         print("Cancelling.")
         exit(1)
@@ -62,6 +61,10 @@ def train_model(hparams):
 
     # Sets to warning level. Disables TensorFlow's verbose messages about GPUs.
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+    # process_id = smooth.util.get_process_id()
+    # smooth.util.tensorflow_init(
+    #     gpu_indices=[process_id % 3 + 1]
+    # )
     smooth.util.tensorflow_init(gpu_indices=[])
 
     import smooth.datasets
@@ -80,15 +83,12 @@ def train_model(hparams):
         dataset=dataset, log_dir=hparams["log_dir"], **model_hparams
     )
 
-    res = smooth.config.shorten_hyperparams(hparams)
+    # res = smooth.config.shorten_hyperparams(hparams)
+    res = hparams
     res.update(updates)
 
     measures = smooth.measures.get_measures(model, dataset)
     res.update(measures)
-    # try:
-    #
-    # except ValueError as e:
-    #     res["error"] = str(e)
 
     print("Finished model training of", hparams)
     print("   ", res)

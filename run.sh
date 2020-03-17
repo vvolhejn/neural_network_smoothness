@@ -1,2 +1,2 @@
 #!/bin/bash
-PYTHONPATH=$PYTHONPATH:$(pwd) python3 smooth/train_models.py "$@"
+python3 smooth/train_models_general.py "$@"

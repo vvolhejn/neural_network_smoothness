@@ -31,26 +31,28 @@ class Stopping(tf.keras.callbacks.Callback):
 
 
 class Measures(tf.keras.callbacks.Callback):
-    def __init__(self, x_val, y_val):
+    def __init__(self, dataset, samples=100):
         super().__init__()
-        self.x_val = x_val
-        self.y_val = y_val
-        self.samples = 100
+        self.dataset = dataset
+        self.samples = samples
 
     def on_test_end(self, logs={}):
         measure_names = [
             "gradient_norm",
-            "l2",
-            "path_length_f",
-            "path_length_d",
+            "weights_rms",
+            "path_length_f_train",
+            "path_length_f_test",
+            "path_length_d_train",
+            "path_length_d_test",
+            "loss_train",
+            "loss_test",
         ]
         history = self.model.history.history
         step = len(history["loss"]) + 1
 
         measures = smooth.measures.get_measures(
             self.model,
-            self.x_val,
-            self.y_val,
+            self.dataset,
             samples=self.samples,
         )
 

@@ -88,34 +88,27 @@ class ClassificationDataset(Dataset):
         assert np.min(y_test) >= 0
         self.n_classes = np.max(y_train) + 1
 
-    def add_label_noise(self, p: float):
-        """
-        With probability p for each label, the label is changed to a random incorrect label.
-        """
 
-        def random_wrong(correct):
-            """
-            Random ints in [0, n_classes) of shape correct.shape,
-            where the original values are avoided
-            """
-            res = np.random.randint(self.n_classes - 1, size=correct.shape)
-            res = res + (res >= correct).astype(int)
-            assert not np.any(res == correct)
-            return res
+def add_label_noise(dataset: Dataset, p: float):
+    """
+    Adds label noise to the training set. The test set is unaffected.
+    With probability p for each label, the label is changed to a random label.
+    Note that the label may be the original label as well.
+    Modifies the dataset in-place.
+    """
 
-        def add_label_noise_to_one(y):
-            # Could have been implemented in a simpler way by adjusting p to account
-            # for the possibility that we generate the correct label "accidentally"
-            y_wrong = random_wrong(y)
-            mask = np.random.random(size=y.shape) < p
-            return np.where(mask, y_wrong, y)
+    labels = np.unique(dataset.y_train)
 
-        return ClassificationDataset(
-            x_train=self.x_train,
-            y_train=add_label_noise_to_one(self.y_train),
-            x_test=self.x_test,
-            y_test=self.y_test,
+    if len(dataset.y_train) >= 100 and len(labels) >= len(dataset.y_train) / 2:
+        # Heuristic to catch obvious cases of adding label noise to non-classification
+        raise ValueError(
+            "Attempting to add label noise to a non-classification dataset"
+            + " (the number of different labels is {})".format(len(labels))
         )
+
+    y_random = labels[np.random.randint(0, len(labels), size=dataset.y_train.shape)]
+    mask = np.random.random(size=dataset.y_train.shape) < p
+    dataset.y_train = np.where(mask, y_random, dataset.y_train)
 
 
 def get_keras_image_dataset(name: str):
@@ -131,51 +124,10 @@ def get_keras_image_dataset(name: str):
 
 def get_cifar10():
     return get_keras_image_dataset("cifar10")
-    # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-    # x_train = x_train.astype(np.float32) / 255.0
-    # x_test = x_test.astype(np.float32) / 255.0
-    # return ClassificationDataset(x_train, y_train, x_test, y_test)
 
 
 def get_mnist():
     return get_keras_image_dataset("mnist")
-    # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-    # x_train = x_train.astype(np.float32) / 255.0
-    # x_test = x_test.astype(np.float32) / 255.0
-    # return ClassificationDataset(x_train, y_train, x_test, y_test)
-
-
-def get_mnist_variant(n_samples, label_noise):
-    with smooth.util.NumpyRandomSeed(8212):
-        mnist2 = get_mnist().subset(n_samples).add_label_noise(label_noise)
-    return mnist2
-
-
-def from_name(name):
-    parts = name.split("-")
-    if parts[0] == "gp":
-        return GaussianProcessDataset.from_name(name)
-    else:
-        ds = get_keras_image_dataset(parts[0])
-        if len(parts) == 1:
-            return ds
-        n_samples = int(parts[1])
-        if len(parts) > 2:
-            raise ValueError("Invalid dataset name: {}".format(name))
-
-        ds = ds.subset(n_samples, keep_test_set=True)
-        ds.name = name
-        return ds
-
-
-def from_params(name, **kwargs):
-    if name == "gp":
-        if "lengthscale_coef" in kwargs:
-            kwargs["lengthscale"] = kwargs["lengthscale_coef"] * kwargs["dim"]
-            del kwargs["lengthscale_coef"]
-        return GaussianProcessDataset(**kwargs)
-    else:
-        raise NotImplementedError
 
 
 class GaussianProcessDataset(Dataset):
@@ -280,3 +232,77 @@ class GaussianProcessDataset(Dataset):
             noise_var=float(noise_var),
             disjoint=bool(int(disjoint)),
         )
+
+
+def make_regression_dataset(base_dataset_f, output_f, name):
+    class C(Dataset):
+        def __init__(self, samples_train: int = None):
+            nonlocal name
+
+            dataset = base_dataset_f()
+
+            full_name = name
+            if samples_train is not None:
+                dataset = dataset.subset(samples_train, keep_test_set=True)
+                full_name = name + "-{}".format(samples_train)
+
+            super().__init__(
+                dataset.x_train,
+                output_f(dataset.x_train, dataset.y_train),
+                dataset.x_test,
+                output_f(dataset.x_test, dataset.y_test),
+                full_name,
+            )
+
+    return C
+
+
+MnistMeanDataset = make_regression_dataset(
+    get_mnist, lambda x, _: np.mean(x.reshape(len(x), -1), axis=-1), "mnistmean",
+)
+
+MnistParityDataset = make_regression_dataset(
+    get_mnist, lambda _, y: y % 2 * 2 - 1, "mnistparity",
+)
+
+
+def from_name(name):
+    parts = name.split("-")
+    if parts[0] == "gp":
+        return GaussianProcessDataset.from_name(name)
+    else:
+        ds = get_keras_image_dataset(parts[0])
+        if len(parts) == 1:
+            return ds
+        n_samples = int(parts[1])
+        if len(parts) > 2:
+            raise ValueError("Invalid dataset name: {}".format(name))
+
+        ds = ds.subset(n_samples, keep_test_set=True)
+        ds.name = name
+        return ds
+
+
+def from_params(name, label_noise=None, **kwargs):
+    if "lengthscale_coef" in kwargs:
+        kwargs["lengthscale"] = kwargs["lengthscale_coef"] * kwargs["dim"]
+        del kwargs["lengthscale_coef"]
+
+    datasets = {
+        "gp": GaussianProcessDataset,
+        "mnistparity": MnistParityDataset,
+        "mnistmean": MnistMeanDataset,
+    }
+
+    if name in datasets:
+        dataset = datasets[name](**kwargs)
+
+        if label_noise is not None:
+            with smooth.util.NumpyRandomSeed(65123):
+                add_label_noise(dataset, label_noise)
+
+            dataset.name += "-{}".format(label_noise)
+
+        return dataset
+    else:
+        raise ValueError("Unknown dataset name: {}".format(name))

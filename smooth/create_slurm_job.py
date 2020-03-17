@@ -56,6 +56,8 @@ def main(config_path):
 
     # print(template.replace("{", "\{{"))
     preview(format_dict)
+    print("Config:")
+    print(config)
     if input("Run job? (y/n): ") != "y":
         print("Aborted.")
         exit(1)

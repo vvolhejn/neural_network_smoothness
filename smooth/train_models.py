@@ -39,7 +39,9 @@ def config():
 
         iterations = 1
         datasets = [
-            "gp-{}-{}-{}-{}-0-{}".format(dim, seed, lengthscale * float(dim), samples_train, disjoint)
+            "gp-{}-{}-{}-{}-0-{}".format(
+                dim, seed, lengthscale * float(dim), samples_train, disjoint
+            )
             for (dim, seed, lengthscale, samples_train, disjoint) in itertools.product(
                 [2 ** x for x in range(1, 10, 2)],
                 range(1, 2),
@@ -66,8 +68,8 @@ def config():
         datasets = [
             "mnist-{}".format(n_samples)
             for n_samples in np.logspace(np.log10(60), np.log10(60000), 20)
-                .round()
-                .astype(int)
+            .round()
+            .astype(int)
         ]
 
         loss_threshold = 0.01
@@ -143,8 +145,9 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
         dataset=dataset,
         verbose=verbose,
         callbacks=[
-            tf.keras.callbacks.EarlyStopping(monitor="loss", patience=5000,
-                                             min_delta=1e-5)
+            tf.keras.callbacks.EarlyStopping(
+                monitor="loss", patience=5000, min_delta=1e-5
+            )
         ],
         **kwargs,
     )
@@ -152,9 +155,7 @@ def train_model(hparams: Hyperparams, verbose: int = 0):
     res = vars(hparams).copy()
 
     res["log_dir"] = model.log_dir
-    measures = smooth.measures.get_measures(
-        model, dataset, samples=1000
-    )
+    measures = smooth.measures.get_measures(model, dataset, samples=1000)
     res.update(measures)
     print("Finished model training of", model.id)
     print("   ", res)
@@ -197,7 +198,7 @@ def main(
             [loss_threshold],
             [activation],
             [use_gpu],
-            [train_val_split]
+            [train_val_split],
         )
     )
     hyperparams_to_try = [Hyperparams(*hp) for hp in hyperparam_combinations]

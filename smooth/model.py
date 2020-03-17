@@ -46,7 +46,7 @@ def get_shallow(
     init_scale: float,
     hidden_size: int,
     activation: str,  # "relu", "tanh" etc.
-):
+) -> tf.keras.Model:
     # Classification or regression?
     classification = "Classification" in type(dataset).__name__
 
@@ -146,10 +146,10 @@ def train_shallow(
         )
         file_writer.set_as_default()
 
-        # measures_cb = smooth.callbacks.Measures(dataset.x_test, dataset.y_test)
-        tensorboard_cb = smooth.callbacks.TensorBoard(model.log_dir, validation_freq)
+        measures_cb = smooth.callbacks.Measures(dataset)
+        # tensorboard_cb = smooth.callbacks.TensorBoard(model.log_dir, validation_freq)
 
-        callbacks += [tensorboard_cb]
+        callbacks += [measures_cb]
 
     model.fit(
         x_train,
@@ -301,3 +301,25 @@ def train_model(name, dataset, **kwargs):
         return model, {"log_dir": model.log_dir}
     else:
         raise ValueError("Unknown model name: {}".format(name))
+
+
+class RegularizedGradientModel(tf.keras.Model):
+    def __init__(self, model: tf.keras.Model, x, coef: float):
+        super(RegularizedGradientModel, self).__init__()
+        self.model = model
+        self.loss = self.model.loss
+        self.loss_functions = self.model.loss_functions
+        self.optimizer = self.model.optimizer
+        self.x_reg = tf.constant(x)
+        self.coef = coef
+
+    def call(self, x):
+        if self.coef != 0:
+            with tf.GradientTape() as tape:
+                tape.watch(self.x_reg)
+                ny = self.modedl(self.x_reg[:1])
+
+            gradient = tape.batch_jacobian(y, self.x_reg[:1])
+            self.add_loss(self.coef * tf.reduce_mean(gradient ** 2))
+
+        return self.model(x)

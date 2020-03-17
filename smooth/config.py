@@ -31,7 +31,9 @@ class Config:
                     raise ValueError("Unknown key in config file: {}".format(k))
 
     def __repr__(self):
-        return yaml.safe_dump(self.raw_config)
+        return yaml.safe_dump(self.raw_config) + "\nHyperparam combinations: {}".format(
+            self.hyperparams_grid.grid_size()
+        )
 
 
 class HyperparamsGrid:
@@ -88,7 +90,7 @@ def hyperparams_by_prefix(d: Dict[str, Any], prefix: str):
     res = {}
     for k, v in d.items():
         if k.startswith(prefix):
-            res[k[len(prefix):]] = v
+            res[k[len(prefix) :]] = v
 
     return res
 
