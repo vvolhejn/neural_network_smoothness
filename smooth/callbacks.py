@@ -8,9 +8,9 @@ from tqdm.keras import TqdmCallback
 
 
 class Stopping(tf.keras.callbacks.Callback):
-    def __init__(self, loss_threshold):
+    def __init__(self, loss_threshold, measure_name="loss"):
         self.loss_threshold = loss_threshold
-        self.monitor = "loss"
+        self.monitor = measure_name
 
     def on_epoch_end(self, epoch, logs=None):
         loss = self.get_monitor_value(logs)
@@ -38,7 +38,8 @@ class Measures(tf.keras.callbacks.Callback):
 
     def on_test_end(self, logs={}):
         measure_names = [
-            "gradient_norm",
+            "gradient_norm_train",
+            "gradient_norm_test",
             "weights_rms",
             "path_length_f_train",
             "path_length_f_test",

@@ -6,14 +6,15 @@ import warnings
 
 import numpy as np
 import tensorflow as tf
-from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow import keras
 from tensorflow.keras.initializers import VarianceScaling
 import GPy
 import sklearn.kernel_ridge
 
 import smooth.datasets
 import smooth.callbacks
+import smooth.measures
 
 assert tf.__version__[0] == "2"
 
@@ -51,7 +52,7 @@ def get_shallow(
     classification = "Classification" in type(dataset).__name__
 
     model = tf.keras.Sequential()
-    model.add(keras.layers.Flatten(input_shape=dataset.x_train[0].shape))
+    model.add(keras.layers.Flatten(input_shape=dataset.x_shape()))
     model.add(
         layers.Dense(
             hidden_size,
@@ -68,15 +69,15 @@ def get_shallow(
             activation=None,
         )
     )
-    model.compile(
-        optimizer=tf.keras.optimizers.SGD(learning_rate),
-        loss=(
-            tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-            if classification
-            else "mse"
-        ),
-        metrics=["accuracy"] if classification else ["mae"],
-    )
+    # model.compile(
+    #     optimizer=tf.keras.optimizers.SGD(learning_rate),
+    #     loss=(
+    #         tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+    #         if classification
+    #         else "mse"
+    #     ),
+    #     metrics=["accuracy"] if classification else ["mae"],
+    # )
 
     return model
 
@@ -94,9 +95,10 @@ def train_shallow(
     log_dir=None,
     callbacks: List[tf.keras.callbacks.Callback] = [],
     activation="relu",
+    gradient_norm_reg_coef=0.0,
 ):
     """
-    Trains a single-layer ReLU network.
+    Trains a single-layer neural network.
 
     :param dataset:
     :param learning_rate:
@@ -111,15 +113,32 @@ def train_shallow(
     :param log_dir: Where to save Tensorboard logs. If None, Tensorboard is not used.
     :param callbacks: list of tf.keras.Callback functions
     :param activation: activation function for the hidden layer
+    :param gradient_norm_reg_coef: strength of gradient norm regularization
     :return: A trained model.
     """
     model = get_shallow(dataset, learning_rate, init_scale, hidden_size, activation)
+    model = RegularizedGradientModel(
+        model,
+        dataset.x_test,
+        coef=gradient_norm_reg_coef,
+    )
+
+    classification = "Classification" in type(dataset).__name__
+    model.compile(
+        optimizer=tf.keras.optimizers.SGD(learning_rate),
+        loss=(
+            tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+            if classification
+            else "mse"
+        ),
+        metrics=["accuracy"] if classification else ["mae"],
+    )
 
     x_train, y_train = dataset.x_train, dataset.y_train
 
     # How many times do we want to validate and call and the Tensorboard callback
     n_updates = 100
-    validation_freq = int(epochs / n_updates)
+    validation_freq = max(10, int(epochs / n_updates))
     model.validation_freq = validation_freq
     model.id = get_model_id(
         learning_rate=learning_rate,
@@ -129,6 +148,7 @@ def train_shallow(
         batch_size=batch_size,
         iteration=iteration,
         dataset=dataset.name,
+        reg_coef=gradient_norm_reg_coef,
     )
 
     callbacks += [
@@ -297,29 +317,34 @@ def train_model(name, dataset, **kwargs):
             **kwargs,
         )
 
-        model.save(os.path.join(model.log_dir, "model.h5"))
+        if isinstance(model, RegularizedGradientModel):
+            # The wrapper is not serializable.
+            model_to_save = model.model
+        else:
+            model_to_save = model
+
+        model_to_save.save(os.path.join(model.log_dir, "model.h5"))
         return model, {"log_dir": model.log_dir}
     else:
         raise ValueError("Unknown model name: {}".format(name))
 
 
 class RegularizedGradientModel(tf.keras.Model):
-    def __init__(self, model: tf.keras.Model, x, coef: float):
+    def __init__(
+        self, model: tf.keras.Model, x_val: np.ndarray, coef: float,
+    ):
         super(RegularizedGradientModel, self).__init__()
         self.model = model
-        self.loss = self.model.loss
-        self.loss_functions = self.model.loss_functions
-        self.optimizer = self.model.optimizer
-        self.x_reg = tf.constant(x)
+        self.x_reg = tf.constant(x_val)
         self.coef = coef
 
     def call(self, x):
+        y = self.model(x)
+
+        reg_loss = 0.
         if self.coef != 0:
-            with tf.GradientTape() as tape:
-                tape.watch(self.x_reg)
-                ny = self.modedl(self.x_reg[:1])
+            reg_loss = self.coef * smooth.measures.gradient_norm(self.model, self.x_reg)
 
-            gradient = tape.batch_jacobian(y, self.x_reg[:1])
-            self.add_loss(self.coef * tf.reduce_mean(gradient ** 2))
+        self.add_loss(reg_loss)
 
-        return self.model(x)
+        return y

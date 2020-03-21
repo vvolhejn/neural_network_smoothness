@@ -61,11 +61,15 @@ def train_model(hparams):
 
     # Sets to warning level. Disables TensorFlow's verbose messages about GPUs.
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-    # process_id = smooth.util.get_process_id()
-    # smooth.util.tensorflow_init(
-    #     gpu_indices=[process_id % 3 + 1]
-    # )
-    smooth.util.tensorflow_init(gpu_indices=[])
+    process_id = smooth.util.get_process_id()
+    smooth.util.tensorflow_init(
+        gpu_indices=[process_id % 4]
+    )
+    # smooth.util.tensorflow_init(gpu_indices=[])
+
+    import tensorflow as tf
+    tf.config.threading.set_intra_op_parallelism_threads(1)
+    tf.config.threading.set_inter_op_parallelism_threads(1)
 
     import smooth.datasets
     import smooth.measures

@@ -41,9 +41,10 @@ def get_measures(
             return {"error": str(e)}
 
     if smooth.model.is_differentiable(model):
-        res["gradient_norm"] = gradient_norm(model, x_test[:samples])
-        # Technically, we need a keras model for this.
-        # But for now differentiable == keras
+        res["gradient_norm_train"] = gradient_norm(model, x_train[:samples])
+        res["gradient_norm_test"] = gradient_norm(model, x_test[:samples])
+        # Technically, we need a keras model for `weights_rms`.
+        # But for now differentiable == keras anyways.
         res["weights_rms"] = weights_rms(model)
 
     try:
@@ -105,17 +106,38 @@ def weights_rms(model: tf.keras.Model):
     return np.sqrt(total / n_weights)
 
 
-def gradient_norm(model: tf.keras.Model, x_input):
+def gradient_norm(model: tf.keras.Model, x):
+    """
+    Evaluates `model` in data points `x`. For each point, calculates the norm
+    of the gradient. Returns the mean of the norms.
+    """
+    was_tensor = True
+
+    if not isinstance(x, tf.Tensor):
+        was_tensor = False
+        x = tf.constant(x)
+
     with tf.GradientTape() as g:
-        x = tf.constant(x_input)
         g.watch(x)
         y = model(x)
+
     dy_dx = g.batch_jacobian(y, x)
-    # For MNIST, we consider each function x -> prob. that x is a "1" separately,
-    # take the Frobenius norms of the Jacobians and take the mean
-    # Should we perhaps take the norm of the entire 10x28x28 tensor?
-    axes_to_sum = tuple(range(2, len(dy_dx.shape)))
-    res = np.mean(np.linalg.norm(dy_dx, axis=axes_to_sum))
+    # shape = (len(x),) + model.output_shape[1:] + (-1,)
+    shape = (len(x), -1)
+
+    dy_dx = tf.reshape(dy_dx, shape)
+
+    # OLD:
+    # For classification, we consider each function x -> prob. that x is a certain class
+    # separately, take the norms of the functions' gradients and take the mean.
+    # NEW:
+    # We take the norm of the entire (d_out x d_in) matrix
+
+    res = tf.reduce_mean(tf.norm(dy_dx, axis=-1))
+
+    if not was_tensor:
+        res = float(res)
+
     return res
 
 
