@@ -1,0 +1,22 @@
+name: smooth_mnist12_debug
+
+cpus: 2
+max_time: "24:00:00"
+memory_gb: 64
+# What information should SLURM send about the job via email? (see docs)
+mail_type: END
+debug: True
+
+hyperparams_grid:
+    - dataset.name: [mnistparity]
+    #    - dataset.samples_train: [10, 17, 28, 46, 77, 129, 215, 359, 599, 1000]
+    - dataset.samples_train: [1000, 10000]
+
+    - model.name: shallow
+    - model.hidden_size: [4, 16, 64]
+    - model.epochs: 20
+    - model.batch_size: 64
+    - model.iteration: [0]
+    - model.learning_rate: [0.01]
+    - model.init_scale:    [1.0 ]
+    - model.loss_threshold: 1.e-5
