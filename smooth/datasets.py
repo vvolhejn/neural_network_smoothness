@@ -1,4 +1,6 @@
 import logging
+import re
+from typing import Optional
 
 import numpy as np
 import tensorflow as tf
@@ -9,7 +11,14 @@ import smooth.util
 
 
 class Dataset:
-    def __init__(self, x_train, y_train, x_test, y_test, name=None):
+    def __init__(
+        self,
+        x_train: np.ndarray,
+        y_train: np.ndarray,
+        x_test: np.ndarray,
+        y_test: np.ndarray,
+        name: str = None,
+    ):
         # Here we cast integers to floats as well, which maybe we should avoid.
         def preprocess(arr):
             arr = np.array(arr).astype(dtype=np.float32)
@@ -266,6 +275,37 @@ MnistParityDataset = make_regression_dataset(
 )
 
 
+def get_binary_mnist(digit_1: int, digit_2: int, samples_train: Optional[int] = None):
+    d1, d2 = digit_1, digit_2
+
+    assert digit_1 < digit_2
+    for d in [d1, d2]:
+        assert 0 <= d <= 9
+
+    mnist = get_mnist()
+    mask_train = np.reshape((mnist.y_train == d1) | (mnist.y_train == d2), -1)
+    mask_test = np.reshape((mnist.y_test == d1) | (mnist.y_test == d2), -1)
+
+    def binarize(y):
+        return (y == d1).astype(float) * 2 - 1
+
+    dataset = smooth.datasets.Dataset(
+        x_train=mnist.x_train[mask_train],
+        y_train=binarize(mnist.y_train[mask_train]),
+        x_test=mnist.x_test[mask_test],
+        y_test=binarize(mnist.y_test[mask_test]),
+    )
+
+    name = "mnist{}{}".format(d1, d2)
+    if samples_train is not None:
+        dataset = dataset.subset(samples_train, keep_test_set=True)
+        name += "-{}".format(samples_train)
+
+    dataset.name = name
+
+    return dataset
+
+
 def from_name(name):
     parts = name.split("-")
     if parts[0] == "gp":
@@ -294,15 +334,19 @@ def from_params(name, label_noise=None, **kwargs):
         "mnistmean": MnistMeanDataset,
     }
 
-    if name in datasets:
+    match = re.match(r"mnist([0-9])([0-9])$", name)
+    if match:
+        d1, d2 = [int(x) for x in match.groups()]
+        dataset = get_binary_mnist(d1, d2, **kwargs)
+    elif name in datasets:
         dataset = datasets[name](**kwargs)
-
-        if label_noise is not None:
-            with smooth.util.NumpyRandomSeed(65123):
-                add_label_noise(dataset, label_noise)
-
-            dataset.name += "-{}".format(label_noise)
-
-        return dataset
     else:
         raise ValueError("Unknown dataset name: {}".format(name))
+
+    if label_noise is not None:
+        with smooth.util.NumpyRandomSeed(65123):
+            add_label_noise(dataset, label_noise)
+
+        dataset.name += "-{}".format(label_noise)
+
+    return dataset

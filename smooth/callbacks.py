@@ -41,6 +41,7 @@ class Measures(tf.keras.callbacks.Callback):
             "gradient_norm_train",
             "gradient_norm_test",
             "weights_rms",
+            "weights_product",
             "path_length_f_train",
             "path_length_f_test",
             "path_length_d_train",

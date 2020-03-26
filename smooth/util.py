@@ -7,6 +7,7 @@ import heapq
 import itertools
 import multiprocessing
 import datetime
+import re
 
 import numpy as np
 import pandas as pd
@@ -45,6 +46,7 @@ class NumpyRandomSeed:
     A context manager for temporarily setting a Numpy seed.
     If None is passed, the generator is not reseeded (the old RNG state is respected).
     """
+
     # TODO: this can be achieved more idiomatically using numpy's RandomState
 
     def __init__(self, seed):
@@ -135,5 +137,16 @@ def run_training_jobs(
 def get_logdir_name(debug=False):
     return os.path.join(
         "logs/" if not debug else "logs_debug/",
-        datetime.datetime.now().strftime("%m%d-%H%M%S")
+        datetime.datetime.now().strftime("%m%d-%H%M%S"),
+    )
+
+
+def dict_to_short_string(d):
+    """
+    >>> dict_to_short_string({"foo.bar": 3, "baz": 1e-10})
+    "b=1e-10_f.b=3"
+    """
+    return "_".join(
+        "{}={}".format(re.sub(r"([^\.])[^_\.]*_?", r"\1", key), value)
+        for key, value in sorted(d.items())
     )

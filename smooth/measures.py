@@ -34,8 +34,7 @@ def get_measures(
             y_pred = model.predict(x[:samples], batch_size=64)
 
             res["loss_{}".format(name)] = sklearn.metrics.mean_squared_error(
-                y[:samples],
-                y_pred
+                y[:samples], y_pred
             )
         except ValueError as e:
             return {"error": str(e)}
@@ -46,6 +45,7 @@ def get_measures(
         # Technically, we need a keras model for `weights_rms`.
         # But for now differentiable == keras anyways.
         res["weights_rms"] = weights_rms(model)
+        res["weights_product"] = float(weights_product(model))
 
     try:
         res["actual_epochs"] = len(model.history.history["loss"])
@@ -104,6 +104,12 @@ def weights_rms(model: tf.keras.Model):
         n_weights += weight_matrix.size
 
     return np.sqrt(total / n_weights)
+
+
+def weights_product(model: tf.keras.Model):
+    # Warning: Returns a tf.Tensor
+    w1, _, w2, _ = model.weights
+    return tf.squeeze(tf.tensordot(tf.norm(w1, axis=0), tf.abs(w2), axes=1))
 
 
 def gradient_norm(model: tf.keras.Model, x):

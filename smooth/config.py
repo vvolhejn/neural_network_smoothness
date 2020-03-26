@@ -1,10 +1,12 @@
 import itertools
+import re
 from typing import Dict, Any, List
 from collections import defaultdict
 
 import yaml
 import numpy as np
 
+import smooth.util
 
 class Config:
     KEYS = ["name", "cpus", "max_time", "memory_gb", "mail_type", "debug", "confirm"]
@@ -71,9 +73,26 @@ class HyperparamsGrid:
 
         self.axes.append(axis)
 
+    def get_constant_keys(self):
+        res = []
+        for axis in self.axes:
+            for key in axis:
+                if len(axis[key]) == 1:
+                    res.append(key)
+
+        return res
+
     def iterator(self):
+        constant_keys = self.get_constant_keys()
+
+        def with_id(d):
+            nonconstant_d = {k: v for (k, v) in d.items() if k not in constant_keys}
+            combination_id = smooth.util.dict_to_short_string(nonconstant_d)
+
+            return d, combination_id
+
         return (
-            merge_dicts(d)
+            with_id(merge_dicts(d))
             for d in itertools.product(*(zip_dicts(axis) for axis in self.axes))
         )
 

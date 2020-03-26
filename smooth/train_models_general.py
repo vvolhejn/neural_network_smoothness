@@ -55,7 +55,7 @@ def experiment_config():
     config_path = _config_path
 
 
-def train_model(hparams):
+def train_model(args):
     import os
     import smooth.util
 
@@ -74,6 +74,9 @@ def train_model(hparams):
     import smooth.datasets
     import smooth.measures
     import smooth.model
+
+    hparams, combination_id = args
+    hparams["model.model_id"] = combination_id
 
     try:
         dataset_hparams = smooth.config.hyperparams_by_prefix(hparams, "dataset.")
@@ -94,9 +97,14 @@ def train_model(hparams):
     measures = smooth.measures.get_measures(model, dataset)
     res.update(measures)
 
-    print("Finished model training of", hparams)
-    print("   ", res)
+    print("Finished model training:", res)
     return res
+
+
+def chunk_list(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i : i + n]
 
 
 @ex.automain
@@ -119,14 +127,21 @@ def main(_run, log_dir, config_path, dry_run):
     measures_path = os.path.join(log_dir, "measures.feather")
 
     results = []
-    with multiprocessing.Pool(processes=config.cpus) as pool:
-        for res in pool.imap_unordered(train_model, hyperparams_to_try):
-            results.append(res)
-            df = pd.DataFrame(results)
-            _run.result = "{}/{} models trained".format(
-                len(results), len(hyperparams_to_try)
-            )
-            print(_run.result)
-            df.to_feather(measures_path)
+
+    # I was getting an OOM error before. Maybe restarting the processes once in a while
+    # could help.
+    CHUNK_SIZE = 64
+    chunks = chunk_list(hyperparams_to_try, CHUNK_SIZE)
+
+    for hyperparams_chunk in chunks:
+        with multiprocessing.Pool(processes=config.cpus) as pool:
+            for res in pool.imap_unordered(train_model, hyperparams_chunk):
+                results.append(res)
+                df = pd.DataFrame(results)
+                _run.result = "{}/{} models trained".format(
+                    len(results), len(hyperparams_to_try)
+                )
+                print(_run.result)
+                df.to_feather(measures_path)
 
     ex.add_artifact(measures_path, content_type="application/feather")

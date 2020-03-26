@@ -1,7 +1,7 @@
 import re
 import os
 import datetime
-from typing import List
+from typing import List, Optional
 import warnings
 
 import numpy as np
@@ -15,6 +15,7 @@ import sklearn.kernel_ridge
 import smooth.datasets
 import smooth.callbacks
 import smooth.measures
+import smooth.util
 
 assert tf.__version__[0] == "2"
 
@@ -26,19 +27,6 @@ def split_dataset(x, y, first_part=0.9):
     x_val = x[split:]
     y_val = y[split:]
     return x_train, y_train, x_val, y_val
-
-
-def get_model_id(**kwargs):
-    return "{}".format(
-        # "exp0211-1",
-        # datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
-        "_".join(
-            (
-                "{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value)
-                for key, value in sorted(kwargs.items())
-            )
-        )
-    )
 
 
 def get_shallow(
@@ -93,9 +81,13 @@ def train_shallow(
     verbose=0,
     loss_threshold=0.0,
     log_dir=None,
-    callbacks: List[tf.keras.callbacks.Callback] = [],
+    callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
     activation="relu",
     gradient_norm_reg_coef=0.0,
+    weights_product_reg_coef=0.0,
+    early_stopping_patience=None,
+    early_stopping_min_delta=None,
+    model_id=None,
 ):
     """
     Trains a single-layer neural network.
@@ -114,14 +106,23 @@ def train_shallow(
     :param callbacks: list of tf.keras.Callback functions
     :param activation: activation function for the hidden layer
     :param gradient_norm_reg_coef: strength of gradient norm regularization
+    :param weights_product_reg_coef: strength of weights product regularization
+    :param early_stopping_patience: how many epochs to wait for loss to improve
+    :param early_stopping_min_delta: minimum loss difference to count as improvement
     :return: A trained model.
     """
+    if callbacks is None:
+        callbacks = []
+
     model = get_shallow(dataset, learning_rate, init_scale, hidden_size, activation)
-    model = RegularizedGradientModel(
-        model,
-        dataset.x_test,
-        coef=gradient_norm_reg_coef,
-    )
+
+    if gradient_norm_reg_coef > 0:
+        model = RegularizedGradientModel(
+            model, dataset.x_test, coef=gradient_norm_reg_coef,
+        )
+
+    if weights_product_reg_coef > 0:
+        model = RegularizedWeightsProductModel(model, coef=weights_product_reg_coef,)
 
     classification = "Classification" in type(dataset).__name__
     model.compile(
@@ -140,16 +141,30 @@ def train_shallow(
     n_updates = 100
     validation_freq = max(10, int(epochs / n_updates))
     model.validation_freq = validation_freq
-    model.id = get_model_id(
-        learning_rate=learning_rate,
-        init_scale=init_scale,
-        hidden_size=hidden_size,
-        epochs=epochs,
-        batch_size=batch_size,
-        iteration=iteration,
-        dataset=dataset.name,
-        reg_coef=gradient_norm_reg_coef,
-    )
+    if model_id is not None:
+        model.id = model_id
+    else:
+        model.id = smooth.util.dict_to_short_string(dict(
+            learning_rate=learning_rate,
+            init_scale=init_scale,
+            hidden_size=hidden_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            iteration=iteration,
+            dataset=dataset.name,
+            gradient_norm_reg_coef=gradient_norm_reg_coef,
+            weights_product_reg_coef=weights_product_reg_coef,
+        ))
+
+    assert (early_stopping_min_delta is None) == (early_stopping_patience is None)
+    if early_stopping_patience is not None:
+        callbacks.append(
+            tf.keras.callbacks.EarlyStopping(
+                monitor="loss",
+                patience=early_stopping_patience,
+                min_delta=early_stopping_min_delta,
+            )
+        )
 
     callbacks += [
         smooth.callbacks.Stopping(loss_threshold),
@@ -309,19 +324,13 @@ def train_model(name, dataset, **kwargs):
 
         model = smooth.model.train_shallow(
             dataset=dataset,
-            callbacks=[
-                tf.keras.callbacks.EarlyStopping(
-                    monitor="loss", patience=10000, min_delta=1e-5
-                )
-            ],
             **kwargs,
         )
 
-        if isinstance(model, RegularizedGradientModel):
+        model_to_save = model
+        while not isinstance(model_to_save, keras.models.Sequential):
             # The wrapper is not serializable.
-            model_to_save = model.model
-        else:
-            model_to_save = model
+            model_to_save = model_to_save.model
 
         model_to_save.save(os.path.join(model.log_dir, "model.h5"))
         return model, {"log_dir": model.log_dir}
@@ -341,10 +350,24 @@ class RegularizedGradientModel(tf.keras.Model):
     def call(self, x):
         y = self.model(x)
 
-        reg_loss = 0.
+        reg_loss = 0.0
         if self.coef != 0:
             reg_loss = self.coef * smooth.measures.gradient_norm(self.model, self.x_reg)
 
         self.add_loss(reg_loss)
 
+        return y
+
+
+class RegularizedWeightsProductModel(tf.keras.Model):
+    def __init__(
+        self, model: tf.keras.Model, coef: float,
+    ):
+        super(RegularizedWeightsProductModel, self).__init__()
+        self.model = model
+        self.coef = coef
+
+    def call(self, x):
+        y = self.model(x)
+        self.add_loss(self.coef * smooth.measures.weights_product(self.model))
         return y
