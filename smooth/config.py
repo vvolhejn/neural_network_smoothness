@@ -8,8 +8,18 @@ import numpy as np
 
 import smooth.util
 
+
 class Config:
-    KEYS = ["name", "cpus", "max_time", "memory_gb", "mail_type", "debug", "confirm"]
+    KEYS = [
+        "name",
+        "cpus",
+        "gpus",
+        "max_time",
+        "memory_gb",
+        "mail_type",
+        "debug",
+        "confirm",
+    ]
     KEYS_SPECIAL = ["hyperparams_grid"]
 
     def __init__(self, config_file):
@@ -22,6 +32,7 @@ class Config:
 
             self.name = data["name"]
             self.cpus = data["cpus"]
+            self.gpus = data.get("gpus", 0)
             self.max_time = data["max_time"]
             self.memory_gb = data["memory_gb"]
             self.mail_type = data["mail_type"]

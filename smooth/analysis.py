@@ -167,7 +167,7 @@ def plot_shallow(
         return animation
 
 
-def remove_constant_columns(df: pd.DataFrame, verbose=False, to_keep: List[str]=[]):
+def remove_constant_columns(df: pd.DataFrame, verbose=False, to_keep: List[str] = []):
     """
     Removes those columns of a DataFrame which are equal across all rows.
     The DF is modified in-place and also returned.
@@ -255,12 +255,12 @@ def get_interpolation_measures(dataset_names, use_test_set=False, use_polynomial
 
 
 def make_palette(values):
-    values = sorted(values)
+    values = sorted(np.unique(values))
     pal = dict(zip(values, sns.cubehelix_palette(len(values), light=0.75)))
     return pal
 
 
-def get_gp_measures(datasets, from_params=False, kernel_f=None, lengthscale_coef=1.):
+def get_gp_measures(datasets, from_params=False, kernel_f=None, lengthscale_coef=1.0):
     """
     Compute "ground truth" measures for given GP datasets. This works by using the GP
     itself as a model. Also computes lower bounds on `path_length_f`, which can be
@@ -276,10 +276,7 @@ def get_gp_measures(datasets, from_params=False, kernel_f=None, lengthscale_coef
 
         kernel = kernel_f(input_dim=dataset.x_shape()[0]) if kernel_f else None
         gp = GPy.models.GPRegression(
-            dataset.x_train,
-            dataset.y_train,
-            noise_var=0.,
-            kernel=kernel,
+            dataset.x_train, dataset.y_train, noise_var=0.0, kernel=kernel,
         )
         gp.kern.lengthscale = dataset.lengthscale * lengthscale_coef
         model = smooth.model.GPModel(gp)
@@ -314,3 +311,60 @@ def compute_or_load_df(
         res = compute_f()
         res.to_feather(path)
         return res
+
+
+def get_display_names():
+    return {
+        "actual_epochs": "Actual epochs",
+        "dataset.name": "Dataset",
+        "dataset.samples_train": "Training set size",
+        "gradient_norm_test": "Gradient norm (test set)",
+        "gradient_norm_train": "Gradient norm (train set)",
+        "gradient_norm_test_normalized": "Normalized gradient norm (test set)",
+        "log_dir": "Log dir",
+        "loss_test": "Test loss",
+        "loss_train": "Train loss",
+        "model.batch_size": "Batch size",
+        "model.epochs": "Epochs",
+        "model.gradient_norm_reg_coef": "$\\lambda_{gn}$ regularization coef.",
+        "model.hidden_size": "Hidden layer size",
+        "model.init_scale": "Initialization scale",
+        "model.iteration": "Iteration",
+        "model.learning_rate": "Learning rate",
+        "model.loss_threshold": "Train loss threshold",
+        "model.model_id": "Model id",
+        "model.name": "Model name",
+        "model.weights_product_reg_coef": "$\\lambda_{wp}$ regularization coef.",
+        "path_length_d_test": "path_length_d_test",
+        "path_length_d_train": "path_length_d_train",
+        "path_length_f_test": "path_length_f_test",
+        "path_length_f_train": "path_length_f_train",
+        "weights_product": "Weights product",
+        "weights_rms": "Weights RMS",
+    }
+
+
+def to_scientific(x: float):
+    """
+    Given x, returns (coef, exponent) such that coef * 10^exponent == x.
+    coef is chosen such that 1 <= |coef| < 10.
+    If x == 0, returns (0, None).
+    """
+    if x == 0:
+        return 0, None
+
+    exp = int(np.floor(np.log10(abs(x))))
+    return x / 10 ** exp, exp
+
+
+def to_scientific_tex(x: float):
+    if x == 0:
+        return "0"
+
+    c, e = to_scientific(x)
+
+    res = r"10^{{{}}}".format(e)
+    if not np.isclose(c, 1):
+        res = r"{} \times".format(c) + res
+
+    return res

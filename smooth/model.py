@@ -57,15 +57,6 @@ def get_shallow(
             activation=None,
         )
     )
-    # model.compile(
-    #     optimizer=tf.keras.optimizers.SGD(learning_rate),
-    #     loss=(
-    #         tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-    #         if classification
-    #         else "mse"
-    #     ),
-    #     metrics=["accuracy"] if classification else ["mae"],
-    # )
 
     return model
 

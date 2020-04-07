@@ -58,16 +58,26 @@ def experiment_config():
 def train_model(args):
     import os
     import smooth.util
+    import subprocess
 
     # Sets to warning level. Disables TensorFlow's verbose messages about GPUs.
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-    process_id = smooth.util.get_process_id()
-    smooth.util.tensorflow_init(
-        gpu_indices=[process_id % 4]
-    )
-    # smooth.util.tensorflow_init(gpu_indices=[])
+
+    def nvidia_smi():
+        res = subprocess.run("nvidia-smi", stdout=subprocess.PIPE)
+        return str(res.stdout).replace("\\n", "\n")
+
+    if _config.gpus > 0:
+        process_id = smooth.util.get_process_id()
+        # print("Before ({}):\n{}".format(process_id, nvidia_smi(),))
+
+        smooth.util.tensorflow_init(gpu_indices=[process_id % _config.gpus])
+        # print("After ({}):\n{}".format(process_id, nvidia_smi(),))
+    else:
+        smooth.util.tensorflow_init(gpu_indices=[])
 
     import tensorflow as tf
+
     tf.config.threading.set_intra_op_parallelism_threads(1)
     tf.config.threading.set_inter_op_parallelism_threads(1)
 
@@ -128,9 +138,9 @@ def main(_run, log_dir, config_path, dry_run):
 
     results = []
 
-    # I was getting an OOM error before. Maybe restarting the processes once in a while
-    # could help.
-    CHUNK_SIZE = 64
+    # I was getting OOM errors when training a large number of models.
+    # Maybe restarting the processes once in a while could help.
+    CHUNK_SIZE = 4 * config.cpus
     chunks = chunk_list(hyperparams_to_try, CHUNK_SIZE)
 
     for hyperparams_chunk in chunks:
