@@ -1,6 +1,7 @@
 *.swp
 logs/
 logs_debug/
+figures/
 .idea/
 venv/
 
