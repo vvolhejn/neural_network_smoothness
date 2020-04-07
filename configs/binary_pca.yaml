@@ -1,24 +1,25 @@
-name: smooth_mnist_binary
+name: mnist_binary_pca
 
-cpus: 10
-max_time: "24:00:00"
+cpus: 32
+max_time: "48:00:00"
 memory_gb: 64
 # What information should SLURM send about the job via email? (see docs)
 mail_type: END
 debug: False
-gpus: 4
+gpus: 0
 
 hyperparams_grid:
     - dataset.name: [mnist01, mnist02, mnist12, mnist03, mnist13, mnist23, mnist04, mnist14, mnist24, mnist34, mnist05, mnist15, mnist25, mnist35, mnist45, mnist06, mnist16, mnist26, mnist36, mnist46, mnist56, mnist07, mnist17, mnist27, mnist37, mnist47, mnist57, mnist67, mnist08, mnist18, mnist28, mnist38, mnist48, mnist58, mnist68, mnist78, mnist09, mnist19, mnist29, mnist39, mnist49, mnist59, mnist69, mnist79, mnist89]
     - dataset.samples_train: [10000]
+    - dataset.pca_dimensions: [8, 32, 128, 512]
 
     - model.name: shallow
-    - model.hidden_size: [4, 16, 64, 256, 1024]
+    - model.hidden_size: [256]
     - model.epochs: 5000
     - model.batch_size: 64
     - model.iteration: [0]
     - model.learning_rate: [0.01]
     - model.init_scale:    [1.0 ]
     - model.loss_threshold: 0
-    - model.weights_product_reg_coef: [1.e-4, 1.e-3]
+    - model.weights_product_reg_coef: 0
     - model.gradient_norm_reg_coef: 0 
