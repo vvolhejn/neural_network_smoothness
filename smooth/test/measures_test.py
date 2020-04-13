@@ -86,3 +86,10 @@ def test_path_length_f_lower_bound():
     lb_true /= len(y) ** 2
 
     assert np.isclose(lb, lb_true, atol=1e-9)
+
+def test_gradient_norm():
+    layer = tf.keras.layers.Dense(1, weights=[np.array([[2], [1]]), np.array([0])])
+    for x in [[3, 4], [2, -1]]:
+        x = np.array([x], dtype=np.float32)
+        gn = smooth.measures.gradient_norm(layer, x)
+        assert np.isclose(gn, np.sqrt(2**2 + 1**2))

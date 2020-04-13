@@ -4,7 +4,6 @@ from math import ceil
 import tensorflow as tf
 import numpy as np
 import sklearn.kernel_ridge
-import GPy
 
 import smooth.datasets
 import smooth.model
@@ -108,7 +107,9 @@ def weights_rms(model: tf.keras.Model):
 
 def weights_product(model: tf.keras.Model):
     # Warning: Returns a tf.Tensor
-    w1, _, w2, _ = model.weights
+    # We take only the last 4 elements of `model.weights` since there might be
+    # a PCA layer before that
+    w1, _, w2, _ = model.weights[-4:]
     return tf.squeeze(tf.tensordot(tf.norm(w1, axis=0), tf.abs(w2), axes=1))
 
 
@@ -128,11 +129,10 @@ def gradient_norm(model: tf.keras.Model, x):
         y = model(x)
 
     dy_dx = g.batch_jacobian(y, x)
-    # shape = (len(x),) + model.output_shape[1:] + (-1,)
-    shape = (len(x), -1)
 
+    # Flatten each batch (matters when y is not just scalar, i.e. for classification)
+    shape = (-1, np.prod(dy_dx.shape[1:]))
     dy_dx = tf.reshape(dy_dx, shape)
-
     # OLD:
     # For classification, we consider each function x -> prob. that x is a certain class
     # separately, take the norms of the functions' gradients and take the mean.

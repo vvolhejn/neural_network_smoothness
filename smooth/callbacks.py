@@ -8,13 +8,13 @@ from tqdm.keras import TqdmCallback
 
 
 class Stopping(tf.keras.callbacks.Callback):
-    def __init__(self, loss_threshold, measure_name="loss"):
-        self.loss_threshold = loss_threshold
+    def __init__(self, threshold, measure_name="mse"):
+        self.threshold = threshold
         self.monitor = measure_name
 
     def on_epoch_end(self, epoch, logs=None):
         loss = self.get_monitor_value(logs)
-        if loss < self.loss_threshold:
+        if loss < self.threshold:
             self.model.stop_training = True
 
     def get_monitor_value(self, logs):
@@ -23,9 +23,10 @@ class Stopping(tf.keras.callbacks.Callback):
         monitor_value = logs.get(self.monitor)
         if monitor_value is None:
             logging.warning(
-                "Early stopping conditioned on measure `%s` "
-                "which is not available. Available measures are: %s",
-                ",".join(list(logs.keys())),
+                "Early stopping conditioned on measure `{}` "
+                "which is not available. Available measures are: `{}`".format(
+                    self.monitor, ",".join(list(logs.keys()))
+                ),
             )
         return monitor_value
 
@@ -53,9 +54,7 @@ class Measures(tf.keras.callbacks.Callback):
         step = len(history["loss"]) + 1
 
         measures = smooth.measures.get_measures(
-            self.model,
-            self.dataset,
-            samples=self.samples,
+            self.model, self.dataset, samples=self.samples,
         )
 
         for k in measure_names:

@@ -324,9 +324,7 @@ def from_name(name):
         return ds
 
 
-def from_params(
-    name, label_noise=None, lengthscale_coef=None, pca_dimensions=None, **kwargs
-):
+def from_params(name, label_noise=None, lengthscale_coef=None, **kwargs):
     if lengthscale_coef is not None:
         kwargs["lengthscale"] = "lengthscale_coef" * kwargs["dim"]
 
@@ -350,15 +348,5 @@ def from_params(
             add_label_noise(dataset, label_noise)
 
         dataset.name += "-ln{}".format(label_noise)
-
-    if pca_dimensions is not None:
-        dataset.x_train = dataset.x_train.reshape(len(dataset.x_train), -1)
-        dataset.x_test = dataset.x_test.reshape(len(dataset.x_test), -1)
-
-        pca = sklearn.decomposition.PCA(n_components=pca_dimensions)
-        dataset.x_train = pca.fit_transform(dataset.x_train)
-        dataset.x_test = pca.transform(dataset.x_test)
-
-        dataset.name += "-pca{}".format(pca_dimensions)
 
     return dataset

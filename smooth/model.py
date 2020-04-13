@@ -6,8 +6,6 @@ import warnings
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers
-from tensorflow import keras
 from tensorflow.keras.initializers import VarianceScaling
 import GPy
 import sklearn.kernel_ridge
@@ -29,31 +27,53 @@ def split_dataset(x, y, first_part=0.9):
     return x_train, y_train, x_val, y_val
 
 
+class PCALayer(tf.keras.layers.Dense):
+    def __init__(self, dims, xs: np.ndarray):
+        pca = sklearn.decomposition.PCA(n_components=dims)
+        pca.fit(xs.reshape(len(xs), -1))
+
+        super().__init__(
+            dims,
+            trainable=False,
+            weights=[pca.components_.T, -np.dot(pca.components_, pca.mean_)],
+        )
+
+
 def get_shallow(
     dataset: smooth.datasets.Dataset,
-    learning_rate: float,
     init_scale: float,
     hidden_size: int,
     activation: str,  # "relu", "tanh" etc.
+    pca_dims: Optional[int] = None,
 ) -> tf.keras.Model:
     # Classification or regression?
     classification = "Classification" in type(dataset).__name__
 
     model = tf.keras.Sequential()
-    model.add(keras.layers.Flatten(input_shape=dataset.x_shape()))
+    model.add(tf.keras.layers.Flatten(input_shape=dataset.x_shape()))
+
+    if pca_dims is not None:
+        model.add(PCALayer(pca_dims, dataset.x_train))
+
     model.add(
-        layers.Dense(
+        tf.keras.layers.Dense(
             hidden_size,
             activation=activation,
-            kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
-            bias_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
+            # kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
+            # bias_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
+            kernel_initializer=VarianceScaling(
+                scale=init_scale, mode="fan_avg", distribution="uniform"
+            ),
         )
     )
     model.add(
-        layers.Dense(
+        tf.keras.layers.Dense(
             dataset.n_classes if classification else 1,
-            kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
-            bias_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
+            # kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
+            # bias_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
+            kernel_initializer=VarianceScaling(
+                scale=init_scale, mode="fan_avg", distribution="uniform"
+            ),
             activation=None,
         )
     )
@@ -70,7 +90,7 @@ def train_shallow(
     batch_size=None,
     iteration=None,
     verbose=0,
-    loss_threshold=0.0,
+    error_threshold=0.0,
     log_dir=None,
     callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
     activation="relu",
@@ -79,6 +99,7 @@ def train_shallow(
     early_stopping_patience=None,
     early_stopping_min_delta=None,
     model_id=None,
+    pca_dims=None,
 ):
     """
     Trains a single-layer neural network.
@@ -92,7 +113,7 @@ def train_shallow(
     :param iteration: Used only as an additional identifier
         (for training multiple models with the same hyperparams)
     :param verbose: Verbosity level passed to `model.fit`
-    :param loss_threshold: Stop training when this loss is reached.
+    :param error_threshold: Stop training when this loss is reached.
     :param log_dir: Where to save Tensorboard logs. If None, Tensorboard is not used.
     :param callbacks: list of tf.keras.Callback functions
     :param activation: activation function for the hidden layer
@@ -105,11 +126,12 @@ def train_shallow(
     if callbacks is None:
         callbacks = []
 
-    model = get_shallow(dataset, learning_rate, init_scale, hidden_size, activation)
+    model = get_shallow(dataset, init_scale, hidden_size, activation, pca_dims)
 
     if gradient_norm_reg_coef > 0:
         model = RegularizedGradientModel(
-            model, dataset.x_test, coef=gradient_norm_reg_coef,
+            model, coef=gradient_norm_reg_coef,
+            # x_val=dataset.x_test,
         )
 
     if weights_product_reg_coef > 0:
@@ -123,7 +145,7 @@ def train_shallow(
             if classification
             else "mse"
         ),
-        metrics=["accuracy"] if classification else ["mae"],
+        metrics=["accuracy"] if classification else ["mae", "mse"],
     )
 
     x_train, y_train = dataset.x_train, dataset.y_train
@@ -135,17 +157,19 @@ def train_shallow(
     if model_id is not None:
         model.id = model_id
     else:
-        model.id = smooth.util.dict_to_short_string(dict(
-            learning_rate=learning_rate,
-            init_scale=init_scale,
-            hidden_size=hidden_size,
-            epochs=epochs,
-            batch_size=batch_size,
-            iteration=iteration,
-            dataset=dataset.name,
-            gradient_norm_reg_coef=gradient_norm_reg_coef,
-            weights_product_reg_coef=weights_product_reg_coef,
-        ))
+        model.id = smooth.util.dict_to_short_string(
+            dict(
+                learning_rate=learning_rate,
+                init_scale=init_scale,
+                hidden_size=hidden_size,
+                epochs=epochs,
+                batch_size=batch_size,
+                iteration=iteration,
+                dataset=dataset.name,
+                gradient_norm_reg_coef=gradient_norm_reg_coef,
+                weights_product_reg_coef=weights_product_reg_coef,
+            )
+        )
 
     assert (early_stopping_min_delta is None) == (early_stopping_patience is None)
     if early_stopping_patience is not None:
@@ -158,7 +182,7 @@ def train_shallow(
         )
 
     callbacks += [
-        smooth.callbacks.Stopping(loss_threshold),
+        smooth.callbacks.Stopping(error_threshold),
         tf.keras.callbacks.TerminateOnNaN(),
     ]
 
@@ -212,7 +236,6 @@ def interpolate_relu_network(dataset: smooth.datasets.Dataset, use_test_set=Fals
     assert len(x.shape) == 1
     model = get_shallow(
         dataset,
-        learning_rate=0.0,  # Not used, but needed in model compilation
         init_scale=1.0,  # Not used, but needed in model compilation
         hidden_size=len(x),
         activation="relu",
@@ -313,13 +336,10 @@ def train_model(name, dataset, **kwargs):
             # Batch size == None -> use GD (batch size is the training set's size)
             kwargs["batch_size"] = len(dataset.x_train)
 
-        model = smooth.model.train_shallow(
-            dataset=dataset,
-            **kwargs,
-        )
+        model = smooth.model.train_shallow(dataset=dataset, **kwargs,)
 
         model_to_save = model
-        while not isinstance(model_to_save, keras.models.Sequential):
+        while not isinstance(model_to_save, tf.keras.models.Sequential):
             # The wrapper is not serializable.
             model_to_save = model_to_save.model
 
@@ -331,19 +351,23 @@ def train_model(name, dataset, **kwargs):
 
 class RegularizedGradientModel(tf.keras.Model):
     def __init__(
-        self, model: tf.keras.Model, x_val: np.ndarray, coef: float,
+        self, model: tf.keras.Model, coef: float, x_val: np.ndarray = None,
     ):
         super(RegularizedGradientModel, self).__init__()
         self.model = model
-        self.x_reg = tf.constant(x_val)
         self.coef = coef
+        if x_val is not None:
+            self.x_reg = tf.constant(x_val)
+        else:
+            self.x_reg = None
 
     def call(self, x):
         y = self.model(x)
 
         reg_loss = 0.0
         if self.coef != 0:
-            reg_loss = self.coef * smooth.measures.gradient_norm(self.model, self.x_reg)
+            x_reg = self.x_reg or x
+            reg_loss = self.coef * smooth.measures.gradient_norm(self.model, x_reg)
 
         self.add_loss(reg_loss)
 
