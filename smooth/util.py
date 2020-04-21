@@ -144,7 +144,7 @@ def get_logdir_name(debug=False):
 def dict_to_short_string(d):
     """
     >>> dict_to_short_string({"foo.bar": 3, "baz": 1e-10})
-    "b=1e-10_f.b=3"
+    'b=1e-10_f.b=3'
     """
     return "_".join(
         "{}={}".format(re.sub(r"([^\.])[^_\.]*_?", r"\1", key), value)

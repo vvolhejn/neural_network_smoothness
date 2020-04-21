@@ -40,11 +40,11 @@ class PCALayer(tf.keras.layers.Dense):
 
 
 def get_shallow(
-    dataset: smooth.datasets.Dataset,
-    init_scale: float,
-    hidden_size: int,
-    activation: str,  # "relu", "tanh" etc.
-    pca_dims: Optional[int] = None,
+        dataset: smooth.datasets.Dataset,
+        init_scale: float,
+        hidden_size: int,
+        activation: str,  # "relu", "tanh" etc.
+        pca_dims: Optional[int] = None,
 ) -> tf.keras.Model:
     # Classification or regression?
     classification = "Classification" in type(dataset).__name__
@@ -82,24 +82,26 @@ def get_shallow(
 
 
 def train_shallow(
-    dataset: smooth.datasets.Dataset,
-    learning_rate,
-    init_scale,
-    hidden_size=200,
-    epochs=1000,
-    batch_size=None,
-    iteration=None,
-    verbose=0,
-    error_threshold=0.0,
-    log_dir=None,
-    callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
-    activation="relu",
-    gradient_norm_reg_coef=0.0,
-    weights_product_reg_coef=0.0,
-    early_stopping_patience=None,
-    early_stopping_min_delta=None,
-    model_id=None,
-    pca_dims=None,
+        dataset: smooth.datasets.Dataset,
+        learning_rate,
+        init_scale,
+        hidden_size=200,
+        epochs=1000,
+        batch_size=None,
+        iteration=None,
+        verbose=0,
+        error_threshold=0.0,
+        log_dir=None,
+        callbacks: Optional[List[tf.keras.callbacks.Callback]] = None,
+        activation="relu",
+        gradient_norm_reg_coef=0.0,
+        weights_product_reg_coef=0.0,
+        path_length_f_reg_coef=0.0,
+        path_length_d_reg_coef=0.0,
+        early_stopping_patience=None,
+        early_stopping_min_delta=None,
+        model_id=None,
+        pca_dims=None,
 ):
     """
     Trains a single-layer neural network.
@@ -130,12 +132,23 @@ def train_shallow(
 
     if gradient_norm_reg_coef > 0:
         model = RegularizedGradientModel(
-            model, coef=gradient_norm_reg_coef,
+            model,
+            coef=gradient_norm_reg_coef,
             # x_val=dataset.x_test,
         )
 
     if weights_product_reg_coef > 0:
-        model = RegularizedWeightsProductModel(model, coef=weights_product_reg_coef,)
+        model = RegularizedWeightsProductModel(model, coef=weights_product_reg_coef, )
+
+    if path_length_f_reg_coef > 0:
+        model = RegularizedPathLengthModel(
+            model, coef=path_length_f_reg_coef, derivative=False
+        )
+
+    if path_length_d_reg_coef > 0:
+        model = RegularizedPathLengthModel(
+            model, coef=path_length_d_reg_coef, derivative=True
+        )
 
     classification = "Classification" in type(dataset).__name__
     model.compile(
@@ -336,7 +349,7 @@ def train_model(name, dataset, **kwargs):
             # Batch size == None -> use GD (batch size is the training set's size)
             kwargs["batch_size"] = len(dataset.x_train)
 
-        model = smooth.model.train_shallow(dataset=dataset, **kwargs,)
+        model = smooth.model.train_shallow(dataset=dataset, **kwargs, )
 
         model_to_save = model
         while not isinstance(model_to_save, tf.keras.models.Sequential):
@@ -351,7 +364,7 @@ def train_model(name, dataset, **kwargs):
 
 class RegularizedGradientModel(tf.keras.Model):
     def __init__(
-        self, model: tf.keras.Model, coef: float, x_val: np.ndarray = None,
+            self, model: tf.keras.Model, coef: float, x_val: np.ndarray = None,
     ):
         super(RegularizedGradientModel, self).__init__()
         self.model = model
@@ -362,8 +375,6 @@ class RegularizedGradientModel(tf.keras.Model):
             self.x_reg = None
 
     def call(self, x):
-        y = self.model(x)
-
         reg_loss = 0.0
         if self.coef != 0:
             x_reg = self.x_reg or x
@@ -371,18 +382,47 @@ class RegularizedGradientModel(tf.keras.Model):
 
         self.add_loss(reg_loss)
 
-        return y
+        return self.model(x)
 
 
 class RegularizedWeightsProductModel(tf.keras.Model):
     def __init__(
-        self, model: tf.keras.Model, coef: float,
+            self, model: tf.keras.Model, coef: float,
     ):
         super(RegularizedWeightsProductModel, self).__init__()
         self.model = model
         self.coef = coef
 
     def call(self, x):
-        y = self.model(x)
         self.add_loss(self.coef * smooth.measures.weights_product(self.model))
-        return y
+        return self.model(x)
+
+
+class RegularizedPathLengthModel(tf.keras.Model):
+    def __init__(
+            self, model: tf.keras.Model, derivative: bool, coef: float,
+    ):
+        super(RegularizedPathLengthModel, self).__init__()
+        self.model = model
+        self.derivative = derivative
+        self.coef = coef
+
+    def call(self, x: tf.Tensor):
+        # Truncate to an even number of elements so that we can form pairs
+        l = tf.shape(x)[0]
+        x_pairs = tf.split(x[:l - l % 2], 2, axis=0)
+
+        self.add_loss(
+            self.coef
+            * tf.reduce_sum(
+                smooth.measures.path_length_one_sample(
+                    self.model,
+                    x_pairs[0],
+                    x_pairs[1],
+                    derivative=self.derivative,
+                    n_samples=100,
+                )
+            )
+        )
+
+        return self.model(x)

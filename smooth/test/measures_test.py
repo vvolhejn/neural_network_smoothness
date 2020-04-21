@@ -45,8 +45,8 @@ def test_relu_net():
 
 
 def test_path_length_f():
-    x1 = np.array([1, 1], dtype=np.float32)
-    x2 = np.array([2, 1], dtype=np.float32)
+    x1 = tf.constant([[1.0, 1.0]])
+    x2 = tf.constant([[2.0, 1.0]])
     tv = smooth.measures.path_length_one_sample(
         model, x1, x2, n_samples=100, derivative=False
     )
@@ -56,14 +56,15 @@ def test_path_length_f():
 
 
 def test_path_length_d():
-    x1 = np.array([1, 1], dtype=np.float32)
-    x2 = np.array([2, 1], dtype=np.float32)
+    x1 = tf.constant([[1.0, 1.0]])
+    x2 = tf.constant([[2.0, 1.0]])
     tv = smooth.measures.path_length_one_sample(
         model, x1, x2, n_samples=100, derivative=True
     )
     # Within one "segment" of this piecewise linear function, the Jacobian is constant
     assert np.isclose(tv, 0, atol=0.5)
-    x2 = np.array([-1, 1], dtype=np.float32)
+
+    x2 = tf.constant([[-1.0, 1.0]])
     tv = smooth.measures.path_length_one_sample(
         model, x1, x2, n_samples=100, derivative=True
     )
@@ -87,9 +88,36 @@ def test_path_length_f_lower_bound():
 
     assert np.isclose(lb, lb_true, atol=1e-9)
 
+
 def test_gradient_norm():
     layer = tf.keras.layers.Dense(1, weights=[np.array([[2], [1]]), np.array([0])])
     for x in [[3, 4], [2, -1]]:
         x = np.array([x], dtype=np.float32)
         gn = smooth.measures.gradient_norm(layer, x)
-        assert np.isclose(gn, np.sqrt(2**2 + 1**2))
+        assert np.isclose(gn, np.sqrt(2 ** 2 + 1 ** 2))
+
+
+def test_path_length_differentiable():
+    x1 = tf.constant([[1.0, 1.0]])
+    x2 = tf.constant([[-3.0, -2.0]])
+
+    old_weights = model.get_weights()
+
+    for use_derivative in [False, True]:
+        y_old = np.inf
+
+        for it in range(5):
+            with tf.GradientTape() as tape:
+                tape.watch(model.weights)
+                y = smooth.measures.path_length_one_sample(
+                    model, x1, x2, 10, derivative=use_derivative
+                )
+
+            j = tf.reshape(tape.jacobian(y, model.weights[2]), model.weights[2].shape)
+            model.weights[2].assign_add(-0.01 * j)
+
+            y_new = float(y)
+            assert y_new < y_old
+            y_old = y_new
+
+        model.set_weights(old_weights)

@@ -147,81 +147,93 @@ def gradient_norm(model: tf.keras.Model, x):
     return res
 
 
-def _path_length(samples, batch=False):
+@tf.custom_gradient
+def stable_norm(x):
+    y = tf.norm(x, axis=2)
+
+    def grad(dy):
+        return tf.expand_dims(dy, axis=-1) * (x / tf.expand_dims(y + 1e-19, axis=-1))
+
+    return y, grad
+
+
+def _path_length(samples: tf.Tensor):
     """
     Given evenly spaced samples of a function's values, computes an approximation
     of the path length, that is the sum of the distances of consecutive samples.
     For scalar samples, this means the sum of absolute values of the first difference,
     for vector-valued functions we sum the l2 norms of the first difference.
 
-    If `batch` is set, we interpret the first axis as the batch axis
-    and treat batches separately.
+    The first axis is interpreted as the batch axis.
 
-    >>> _path_length([1, 2, 3, 1])
+    >>> float(_path_length(tf.constant([[1, 2, 3, 1]], dtype=tf.float32)))
     4.0
-    >>> print("{:.3f}".format(_path_length([[0, 0], [1, 1], [1, 2]])))
+    >>> l = _path_length(tf.constant([[[0, 0], [1, 1], [1, 2]]], dtype=tf.float32))
+    >>> print("{:.3f}".format(float(l)))
     2.414
-    >>> _path_length([[0, 0], [1, 1], [1, 2]], batch=True)
-    array([0., 0., 1.])
+    >>> np.array(_path_length(tf.constant([[0, 0], [1, 1], [1, 2]], dtype=tf.float32)))
+    array([0., 0., 1.], dtype=float32)
     """
-    if not batch:
-        samples = np.array([samples])
-    res = np.diff(samples, axis=1)
-    if res.ndim == 2:
-        res = res[:, :, np.newaxis]
-    res = np.linalg.norm(res, axis=2)
-    res = np.sum(res, axis=1)
+    assert isinstance(samples, tf.Tensor)
 
-    if not batch:
-        assert len(res) == 1
-        return res[0]
-    else:
-        return res
+    # if tf.rank(samples)== 2:
+    # print("Shape0: ", samples.shape)
+    # samples = tf.expand_dims(samples, axis=-1)
+
+    res = samples[:, 1:, :] - samples[:, :-1, :]
+
+    res = stable_norm(res)
+    # res = tf.norm(res, axis=2)
+    res = tf.reduce_sum(res, axis=1)
+
+    return res
 
 
-def _interpolate(a, b, n_samples):
+def _interpolate(a: tf.Tensor, b: tf.Tensor, n_samples):
     """
-    >>> _interpolate(1, 2, 3).round(1).tolist()
+    >>> _interpolate(1., 2., 3).round(1).tolist()
     [1.0, 1.5, 2.0]
     >>> _interpolate([0, 3], [3, 0], 4).round(1).tolist()
     [[0.0, 3.0], [1.0, 2.0], [2.0, 1.0], [3.0, 0.0]]
     >>> _interpolate([[0, 2], [1, 1]], [[2, 0], [2, 2]], 3).round(1).tolist()
     [[[0.0, 2.0], [1.0, 1.0]], [[1.0, 1.0], [1.5, 1.5]], [[2.0, 0.0], [2.0, 2.0]]]
     """
-    a, b = np.array(a), np.array(b)
-    assert a.shape == b.shape
-    w = np.linspace(0, 1, n_samples, dtype=np.float32)
-    res = np.outer(1 - w, a) + np.outer(w, b)
-    res = np.reshape(res, (-1,) + a.shape)
+    # a, b = np.array(a), np.array(b)
+    # assert a.shape == b.shape
+
+    w = tf.linspace(0.0, 1.0, n_samples)
+    res = tf.tensordot(w, a, axes=0) + tf.tensordot(1.0 - w, b, axes=0)
     return res
 
 
 def path_length_one_sample(
     model: tf.keras.Model,
-    x1,
-    x2,
+    x1: tf.Tensor,
+    x2: tf.Tensor,
     n_samples: int,
     derivative: bool,
-    batch=False,
     softmax=False,
 ):
-    if not batch:
-        x1 = [x1]
-        x2 = [x2]
-    x1 = np.array(x1)
-    x2 = np.array(x2)
-    n_segments = len(x1)
-    assert x1.shape == x2.shape
+    assert not softmax
+    # assert x1.shape == x2.shape
+    tf.debugging.assert_all_finite(x1, "x1")
+    tf.debugging.assert_all_finite(x2, "x2")
     samples = _interpolate(x1, x2, n_samples)
-    samples_flat = np.reshape(samples, (n_samples * n_segments,) + samples.shape[2:])
+
+    samples_flat = tf.reshape(
+        samples, tf.concat([[-1], tf.shape(samples)[2:]], axis=0),
+    )
 
     if not derivative:
-        output_flat = model.predict(samples_flat, batch_size=1024)
+        # output_flat = model.predict(samples_flat, batch_size=1024)
+        output_flat = model(samples_flat)
+        tf.debugging.assert_all_finite(output_flat, "output_flat0")
         if softmax:
             output_flat = tf.nn.softmax(output_flat)
     else:
         with tf.GradientTape() as g:
-            x = tf.constant(samples_flat)
+            # x = tf.constant(samples_flat)
+            x = samples_flat
             g.watch(x)
             y = model(x)
             if softmax:
@@ -229,20 +241,22 @@ def path_length_one_sample(
         output_flat = g.batch_jacobian(y, x)
         # We just stretch the Jacobian into a single vector and take the path length
         # of this vector "moving around".
-        # (meaning we sum the Frobenius norms of the first difference)
+        # (meaning we sum the Fro   benius norms of the first difference)
         # Does this make any sense mathematically?
-        output_flat = np.reshape(output_flat, (len(samples_flat), -1))
+        output_flat = tf.reshape(output_flat, [tf.shape(output_flat)[0], -1])
 
-    output = np.reshape(output_flat, (n_samples, n_segments) + output_flat.shape[1:])
-    output = np.swapaxes(output, 0, 1)
-    # at this point, `output` has shape (n_segments, n_samples, n_classes)
-    res = _path_length(output, batch=True)
+    tf.debugging.assert_all_finite(output_flat, "output_flat")
 
-    if not batch:
-        assert len(res) == 1
-        return res[0]
-    else:
-        return res
+    output = tf.reshape(
+        output_flat, tf.concat([[n_samples, -1], tf.shape(output_flat)[1:]], axis=0)
+    )
+    p = tf.concat([[1, 0], tf.range(2, tf.rank(output))], axis=0)
+
+    output = tf.transpose(output, p)
+    # tf.print(tf.shape(output))
+    res = _path_length(output)
+
+    return res
 
 
 def path_length(
@@ -259,6 +273,7 @@ def path_length(
     of the line segment between the two points when passed through the model.
     This is repeated `n_segments` times and the average is taken.
     """
+    return 0
 
     x = x_input[np.random.randint(len(x_input), size=(2 * segments,))]
     x = np.array([x[:segments], x[segments:]])
@@ -270,7 +285,7 @@ def path_length(
     for batch in batches:
         x1, x2 = np.swapaxes(batch, 0, 1)
         cur = path_length_one_sample(
-            model, x1, x2, samples_per_segment, derivative, batch=True, softmax=softmax
+            model, x1, x2, samples_per_segment, derivative, softmax=softmax
         )
         results.append(cur)
 
