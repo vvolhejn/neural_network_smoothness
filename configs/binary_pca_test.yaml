@@ -6,12 +6,11 @@ memory_gb: 64
 # What information should SLURM send about the job via email? (see docs)
 mail_type: END
 debug: True
-gpus: 4
+gpus: 0
 
 hyperparams_grid:
     - dataset.name: [mnist01]
     - dataset.samples_train: [10000]
-    - dataset.pca_dimensions: [8, 32, 128, 512]
 
     - model.name: shallow
     - model.hidden_size: [256]
@@ -23,3 +22,4 @@ hyperparams_grid:
     - model.loss_threshold: 0
     - model.weights_product_reg_coef: 0
     - model.gradient_norm_reg_coef: 0 
+    - model.pca_dims: [8, 32, 128, 512]

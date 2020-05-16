@@ -1,0 +1,26 @@
+name: gp_1d
+
+cpus: 45
+max_time: "60:00:00"
+memory_gb: 90
+# What information should SLURM send about the job via email? (see docs)
+mail_type: END
+debug: True
+gpus: 0
+
+hyperparams_grid:
+    - dataset.name: gp
+    - dataset.lengthscale: 0.3
+    - dataset.seed: [1, 2]
+    - dataset.noise_var: 0
+    - dataset.samples_train: [10]
+
+    - model.name: shallow
+    - model.hidden_size: 256
+    - model.epochs: 25000
+    - model.batch_size: 10
+    - model.iteration: [0]
+    - model.learning_rate: [0.1]
+    - model.init_scale:    [0.01 ]
+    - model.error_threshold: 1.e-5
+#    - model.error_threshold: 0
