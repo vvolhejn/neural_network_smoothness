@@ -1,7 +1,7 @@
 """
 Functions for analysis in Jupyter Notebooks.
 """
-from typing import List, Callable
+from typing import List, Callable, Tuple
 import os
 import logging
 
@@ -314,13 +314,10 @@ def compute_or_load_df(
 
 
 def get_display_names():
-    return {
+    display_names = {
         "actual_epochs": "Actual epochs",
         "dataset.name": "Dataset",
         "dataset.samples_train": "Training set size",
-        "gradient_norm_test": "Gradient norm (test set)",
-        "gradient_norm_train": "Gradient norm (train set)",
-        "gradient_norm_test_normalized": "Normalized gradient norm (test set)",
         "log_dir": "Log dir",
         "loss_test": "Test loss",
         "loss_train": "Train loss",
@@ -335,13 +332,30 @@ def get_display_names():
         "model.model_id": "Model id",
         "model.name": "Model name",
         "model.weights_product_reg_coef": "$\\lambda_{wp}$ regularization coef.",
-        "path_length_d_test": "path_length_d_test",
-        "path_length_d_train": "path_length_d_train",
-        "path_length_f_test": "path_length_f_test",
-        "path_length_f_train": "path_length_f_train",
+        "model.path_length_f_reg_coef": "$\\lambda_{pl0}$ regularization coef.",
+        "model.path_length_d_reg_coef": "$\\lambda_{pl1}$ regularization coef.",
+    }
+
+    measures = {
+        "gradient_norm_test": "Gradient norm (test set)",
+        "gradient_norm_train": "Gradient norm (train set)",
+        "path_length_d_test": "Gradient path length (test set)",
+        "path_length_d_train": "Gradient path length (train set)",
+        "path_length_f_test": "Function path length (test set)",
+        # This one is only used in the normalized version, hence the weird name
+        "path_length_f_test_baselined": "and baselined function path length (test set)",
+        "path_length_f_train": "Function path length (train set)",
         "weights_product": "Weights product",
         "weights_rms": "Weights RMS",
     }
+
+    for measure, display_name in list(measures.items()):
+        display_name = display_name[0].lower() + display_name[1:]
+        measures[measure + "_normalized"] = "Normalized " + display_name
+
+    display_names.update(measures)
+
+    return display_names
 
 
 def to_scientific(x: float):
@@ -368,3 +382,54 @@ def to_scientific_tex(x: float):
         res = r"{} \times".format(c) + res
 
     return res
+
+
+def load_measures(path: str, kind_cols: List[Tuple[str, str]], remove_unconverged=True):
+    ms = pd.read_feather(path)
+
+    bad_mask = ~np.isfinite(ms["loss_test"])
+    print("Removing {} entries".format(sum(bad_mask)))
+    ms = ms[~bad_mask]
+
+    if remove_unconverged:
+        max_epochs = ms["model.epochs"].iloc[0]
+        unconverged_mask = ms["actual_epochs"] == max_epochs
+        print(
+            "Removing {} models which have not converged".format(sum(unconverged_mask))
+        )
+        ms = ms[~unconverged_mask]
+
+    ms["kind"] = ""
+    for i, (col, short_name) in enumerate(kind_cols):
+        if i > 0:
+            ms["kind"] += ", "
+        ms["kind"] += short_name + ": " + ms[col].map(str)
+
+    ms = ms.sort_values([col for col, _ in kind_cols])
+
+    remove_constant_columns(
+        ms, verbose=True, to_keep=[x[0] for x in kind_cols] + ["kind"]
+    )
+
+    print("Remaining:", len(ms))
+
+    return ms
+
+
+def get_ratios(
+    ms: pd.DataFrame, base_mask: pd.DataFrame, normed_col: str, match_col="dataset.name"
+):
+    ms = ms.copy()
+    base = ms[base_mask]
+    assert base[match_col].is_unique
+
+    normed_col_after = normed_col + "_normalized"
+
+    # Inefficient, but good enough
+    for _, row in base.iterrows():
+        cur = ms.loc[ms[match_col] == row[match_col]]
+        ms.loc[ms[match_col] == row[match_col], normed_col_after] = (
+            cur[normed_col] / row[normed_col]
+        )
+
+    return ms

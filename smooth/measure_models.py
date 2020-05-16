@@ -11,13 +11,11 @@ import click
 import smooth.util
 
 
-# import tensorflow_init
-
-
 def measure_saved_model(args):
     import tensorflow as tf
     import smooth.datasets
     import smooth.model
+    import smooth.measures
 
     model_path, gpu_indices = args
 

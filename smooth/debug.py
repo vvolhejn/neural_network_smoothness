@@ -9,7 +9,7 @@ def main():
         dataset,
         learning_rate=0.01,
         init_scale=0.1,
-        epochs=200,
+        epochs=5,
         verbose=2,
         batch_size=64,
         # path_length_d_reg_coef=1e-3,
@@ -17,6 +17,8 @@ def main():
     )
 
     print(model.history.history)
+    print(smooth.measures.get_measures(model, dataset, samples=24))
+
 
 if __name__ == "__main__":
     main()

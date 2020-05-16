@@ -14,7 +14,7 @@ def get_measures(
     dataset: smooth.datasets.Dataset,
     samples=1000,
     # If set, instead of sampling segments use one segment spanning the entire domain
-    precise_in_1d=True,
+    precise_in_1d=False,
     is_classification=False,
 ):
     res = {}
@@ -41,6 +41,8 @@ def get_measures(
     if smooth.model.is_differentiable(model):
         res["gradient_norm_train"] = gradient_norm(model, x_train[:samples])
         res["gradient_norm_test"] = gradient_norm(model, x_test[:samples])
+        res["gradient_norm_squared_train"] = gradient_norm(model, x_train[:samples], power=2)
+        res["gradient_norm_squared_test"] = gradient_norm(model, x_test[:samples], power=2)
         # Technically, we need a keras model for `weights_rms`.
         # But for now differentiable == keras anyways.
         res["weights_rms"] = weights_rms(model)
@@ -113,7 +115,7 @@ def weights_product(model: tf.keras.Model):
     return tf.squeeze(tf.tensordot(tf.norm(w1, axis=0), tf.abs(w2), axes=1))
 
 
-def gradient_norm(model: tf.keras.Model, x):
+def gradient_norm(model: tf.keras.Model, x, power=1):
     """
     Evaluates `model` in data points `x`. For each point, calculates the norm
     of the gradient. Returns the mean of the norms.
@@ -139,7 +141,7 @@ def gradient_norm(model: tf.keras.Model, x):
     # NEW:
     # We take the norm of the entire (d_out x d_in) matrix
 
-    res = tf.reduce_mean(tf.norm(dy_dx, axis=-1))
+    res = tf.reduce_mean(tf.norm(dy_dx, axis=-1) ** power)
 
     if not was_tensor:
         res = float(res)
@@ -273,8 +275,6 @@ def path_length(
     of the line segment between the two points when passed through the model.
     This is repeated `n_segments` times and the average is taken.
     """
-    return 0
-
     x = x_input[np.random.randint(len(x_input), size=(2 * segments,))]
     x = np.array([x[:segments], x[segments:]])
     x = np.swapaxes(x, 0, 1)
@@ -284,12 +284,15 @@ def path_length(
     results = []
     for batch in batches:
         x1, x2 = np.swapaxes(batch, 0, 1)
+        x1 = tf.constant(x1)
+        x2 = tf.constant(x2)
         cur = path_length_one_sample(
             model, x1, x2, samples_per_segment, derivative, softmax=softmax
         )
-        results.append(cur)
 
-    return np.mean(results)
+        results.append(np.array(cur))
+
+    return np.mean(np.concatenate(results))
 
 
 def path_length_f_lower_bound(dataset: smooth.datasets.Dataset, use_test_set=True):
