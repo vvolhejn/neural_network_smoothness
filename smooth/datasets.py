@@ -1,9 +1,8 @@
-import logging
 import re
 from typing import Optional
+import warnings
 
 import numpy as np
-import sklearn.decomposition
 import tensorflow as tf
 import GPy
 import matplotlib.pyplot as plt
@@ -12,6 +11,10 @@ import smooth.util
 
 
 class Dataset:
+    """
+    A dataset of NumPy arrays divided into training and test sets.
+    """
+
     def __init__(
         self,
         x_train: np.ndarray,
@@ -141,6 +144,10 @@ def get_mnist():
 
 
 class GaussianProcessDataset(Dataset):
+    """
+    A synthetic dataset sampled from a Gaussian process.
+    """
+
     DEFAULT_NOISE_VAR = 0.001
 
     def __init__(
@@ -171,7 +178,6 @@ class GaussianProcessDataset(Dataset):
             noise_var=self.noise_var,
         )
         gp_model.kern.lengthscale = lengthscale
-        # 0.1 * (x_max - x_min)
         self.gp_model = gp_model
 
         with smooth.util.NumpyRandomSeed(seed):
@@ -179,8 +185,13 @@ class GaussianProcessDataset(Dataset):
             # set (a ground truth function) before sampling the training set
             if dim == 1:
                 samples_test = int(50 / lengthscale)
-                # Silently truncates the number of training samples if necessary.
-                # Is this a good thing?
+                if samples_train > samples_test:
+                    warnings.warn(
+                        "Warning: attempting to sample more training samples"
+                        "than how many are available! ({} vs {})".format(
+                            samples_train, samples_test
+                        )
+                    )
                 samples_train = min(samples_train, samples_test)
                 x_test = np.linspace(x_min, x_max, samples_test).reshape(-1, 1)
                 y_test = gp_model.posterior_samples_f(x_test, size=1)[:, :, 0]
@@ -221,7 +232,7 @@ class GaussianProcessDataset(Dataset):
 
     @staticmethod
     def from_name(name):
-        # MAX_SAMPLES = 1000
+        # Mostly obsolete
         parts = name.split("-")
         gp, dim, seed, lengthscale, samples_train = parts[:5]
         assert gp == "gp"
@@ -245,6 +256,8 @@ class GaussianProcessDataset(Dataset):
 
 
 def make_regression_dataset(base_dataset_f, output_f, name):
+    """Create a regression dataset by mapping over another dataset."""
+
     class C(Dataset):
         def __init__(self, samples_train: int = None):
             nonlocal name
@@ -267,6 +280,7 @@ def make_regression_dataset(base_dataset_f, output_f, name):
     return C
 
 
+# These datasets ended up not being used.
 MnistMeanDataset = make_regression_dataset(
     get_mnist, lambda x, _: np.mean(x.reshape(len(x), -1), axis=-1), "mnistmean",
 )
@@ -277,6 +291,7 @@ MnistParityDataset = make_regression_dataset(
 
 
 def get_binary_mnist(digit_1: int, digit_2: int, samples_train: Optional[int] = None):
+    """MNIST limited to two digits, whose labels are -1 and 1."""
     d1, d2 = digit_1, digit_2
 
     assert digit_1 < digit_2
@@ -308,6 +323,7 @@ def get_binary_mnist(digit_1: int, digit_2: int, samples_train: Optional[int] = 
 
 
 def from_name(name):
+    # Mostly obsolete.
     parts = name.split("-")
     if parts[0] == "gp":
         return GaussianProcessDataset.from_name(name)
@@ -325,6 +341,10 @@ def from_name(name):
 
 
 def from_params(name, label_noise=None, lengthscale_coef=None, **kwargs):
+    """
+    Creates any dataset by passing on keyword arguments. This allows us to specify which
+    dataset to use in a string, so that it can be selected in a config file.
+    """
     if lengthscale_coef is not None:
         kwargs["lengthscale"] = "lengthscale_coef" * kwargs["dim"]
 

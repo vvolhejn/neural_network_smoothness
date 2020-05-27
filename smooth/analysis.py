@@ -3,7 +3,6 @@ Functions for analysis in Jupyter Notebooks.
 """
 from typing import List, Callable, Tuple
 import os
-import logging
 
 import tensorflow as tf
 import numpy as np
@@ -20,13 +19,52 @@ import smooth.model
 import smooth.measures
 
 
-def get_kendall_coefs(
+def get_measure_names():
+    return [
+        "gradient_norm_test",
+        "path_length_f_test",
+        "path_length_d_test",
+        "weights_product",
+    ]
+
+
+def get_kendall(ms, col_1, col_2, get_pvalues=False):
+    tau = scipy.stats.kendalltau(ms[col_1], ms[col_2])
+
+    if get_pvalues:
+        return tau.pvalue
+    else:
+        return tau.correlation
+
+
+def get_kendalls(ms, col_1, cols=None, get_pvalues=False):
+    if cols is None:
+        cols = get_measure_names()
+
+    res = [get_kendall(ms, col_1, col, get_pvalues) for col in cols]
+    return pd.Series(res, index=cols)
+
+
+def summarize_kendalls(ms, groupby, x_col, y_cols, get_pvalues=False):
+    """
+    First, group `ms` using `groupby`. For each group, compute the Kendall rank
+    correlation coefficient between `x_col` and each of `y_cols`. This yields
+    a coefficient (or pvalue, if `get_pvalues==True`) for each group and each of `y_cols`.
+    """
+    return ms.groupby(groupby).apply(
+        lambda df: get_kendalls(df, x_col, y_cols, get_pvalues)
+    )
+
+
+def get_granulated_kendall_coefs(
     df: pd.DataFrame,
     hyperparam_cols: List[str],
     result_col: str,
     measure_cols: List[str],
 ):
     """
+    (Unused)
+
     Given a dataframe containing the hyperparameters and measures of trained models,
     computes Kendall's tau coefficients between a measure to be predicted (result_col)
     and the measures used to predict it (measure_cols).
@@ -42,18 +80,17 @@ def get_kendall_coefs(
         columns=pd.Index(hyperparam_cols + ["overall_tau", "psi"], name="Kendall"),
     )
 
-    def get_kendall(df, measure):
-        return scipy.stats.kendalltau(df[result_col], df[measure]).correlation
-
     for measure in measure_cols:
-        res["overall_tau"][measure] = get_kendall(df, measure)
+        res["overall_tau"][measure] = get_kendall(df, result_col, measure)
 
         psi_total = 0
         for hyperparam in hyperparam_cols:
             other_columns = hyperparam_cols.copy()
             other_columns.remove(hyperparam)
             groups = df.groupby(other_columns)
-            groups = groups.apply(lambda group_df: get_kendall(group_df, measure))
+            groups = groups.apply(
+                lambda group_df: get_kendall(group_df, result_col, measure)
+            )
             res[hyperparam][measure] = groups.mean()
             psi_total += res[hyperparam][measure]
 
@@ -186,6 +223,8 @@ def remove_constant_columns(df: pd.DataFrame, verbose=False, to_keep: List[str] 
 
 def expand_dataset_columns(df: pd.DataFrame):
     """
+    (Unused)
+
     Given an analysis DataFrame where the dataset is a `GaussianProcessDataset`,
     expands the dataset's name into columns describing its properties
     (seed, lengthscale and samples_train).
@@ -229,6 +268,8 @@ def expand_dataset_columns(df: pd.DataFrame):
 
 def get_interpolation_measures(dataset_names, use_test_set=False, use_polynomial=False):
     """
+    (Unused)
+
     For the GP datasets in `dataset_names`, take the measures of certain special models.
     If `use_polynomial` is False, interpolates a piecewise linear function between
     either the training or test set (based on `use_test_set`).
@@ -262,6 +303,8 @@ def make_palette(values):
 
 def get_gp_measures(datasets, from_params=False, kernel_f=None, lengthscale_coef=1.0):
     """
+    (Unused)
+
     Compute "ground truth" measures for given GP datasets. This works by using the GP
     itself as a model. Also computes lower bounds on `path_length_f`, which can be
     computed from the outputs alone.
@@ -377,14 +420,19 @@ def to_scientific_tex(x: float):
 
     c, e = to_scientific(x)
 
+    # Holy cow!
     res = r"10^{{{}}}".format(e)
     if not np.isclose(c, 1):
-        res = r"{} \times".format(c) + res
+        res = r"{:.1f} \times ".format(c) + res
 
     return res
 
 
 def load_measures(path: str, kind_cols: List[Tuple[str, str]], remove_unconverged=True):
+    """
+    Loads a `measures.feather` file produced by `train_models_general` and performs
+    pre-processing.
+    """
     ms = pd.read_feather(path)
 
     bad_mask = ~np.isfinite(ms["loss_test"])
@@ -419,6 +467,10 @@ def load_measures(path: str, kind_cols: List[Tuple[str, str]], remove_unconverge
 def get_ratios(
     ms: pd.DataFrame, base_mask: pd.DataFrame, normed_col: str, match_col="dataset.name"
 ):
+    """
+    Computes normalized values of a dataframe's column by dividing by the value
+    in a "corresponding" row. Used e.g. when explicitly regularizing smoothness measures
+    """
     ms = ms.copy()
     base = ms[base_mask]
     assert base[match_col].is_unique

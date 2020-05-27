@@ -4,10 +4,13 @@ import copy
 import tensorflow as tf
 import smooth.measures
 
-from tqdm.keras import TqdmCallback
-
 
 class Stopping(tf.keras.callbacks.Callback):
+    """
+    Stops model training when a measure reaches a certain threshold.
+    In practice, we stop when we reach a certain value of training loss.
+    """
+
     def __init__(self, threshold, measure_name="mse"):
         self.threshold = threshold
         self.monitor = measure_name
@@ -32,6 +35,10 @@ class Stopping(tf.keras.callbacks.Callback):
 
 
 class Measures(tf.keras.callbacks.Callback):
+    """
+    Computes various measures during training.
+    """
+
     def __init__(self, dataset, samples=100):
         super().__init__()
         self.dataset = dataset
@@ -67,7 +74,7 @@ class Measures(tf.keras.callbacks.Callback):
 
 class TensorBoard(tf.keras.callbacks.TensorBoard):
     """
-    A variant of the tensorboard callback which only logs data during validation.
+    A variant of the TensorBoard callback which only logs data during validation.
     This is to prevent the storing of unnecessary amounts of data, which slows TB down.
     """
 
@@ -86,22 +93,9 @@ class TensorBoard(tf.keras.callbacks.TensorBoard):
             super().on_epoch_end(epoch, logs)
 
 
-class Tqdm(TqdmCallback):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-#         self.on_train_batch_begin = self.on_batch_begin
-#         self.on_train_batch_end = self.on_batch_end
-#         setattr(self, 'on_test_begin', lambda x: None)
-#         setattr(self, 'on_test_end', lambda x: None)
-#         setattr(self, 'on_test_batch_begin', lambda x, y: None)
-#         setattr(self, 'on_test_batch_end', lambda x, y: None)
-
-
 class WeightsHistoryCallback(tf.keras.callbacks.Callback):
     """
-    Periodically save the model's weights. Dynamically alters the saving frequency
+    Periodically saves the model's weights. Dynamically alters the saving frequency
     so that the number of snapshots is in [min_snapshots, 2*min_snapshots).
     """
 

@@ -1,9 +1,12 @@
-# For multiprocessing to work, TensorFlow must only be imported in the child processes
+"""
+Trains multiple models in parallel using multiprocessing.
+Data about the experiment is saved using Sacred.
+"""
+
+# For multiprocessing to work, TensorFlow must only be imported in the child processes,
+# which is why we don't import it here
 import multiprocessing
-import datetime
 import os
-import itertools
-import copy
 import shutil
 import logging
 
@@ -26,10 +29,14 @@ def confirmation_prompt(config: smooth.config.Config):
 if __name__ == "__main__":
     try:
         _config_path = os.environ["SMOOTH_CONFIG"]
+        _db_url = os.environ["SMOOTH_DB_URL"]
+        _db_name = os.environ["SMOOTH_DB_NAME"]
     except KeyError:
         raise RuntimeError(
-            "Please set the SMOOTH_CONFIG environment variable"
-            " to the path of the config YAML file."
+            "Please set the following environment variables:\n"
+            "SMOOTH_CONFIG: path of the config YAML file\n"
+            "SMOOTH_DB_URL: URL of the MongoDB database for Sacred\n"
+            "SMOOTH_DB_NAME: name of the MongoDB database for Sacred"
         )
 
     _config = smooth.config.Config(_config_path)
@@ -40,7 +47,8 @@ if __name__ == "__main__":
 
     if not _config.debug:
         observer = sacred.observers.MongoObserver(
-            url="mongodb://mongochl.docker.ist.ac.at:9060", db_name="vv-smoothness"
+            url=_db_url,
+            db_name=_db_name,
         )
         ex.observers.append(observer)
 else:
@@ -56,23 +64,20 @@ def experiment_config():
 
 
 def train_model(args):
+    """
+    Trains a single model with hyperparameters specified by a dictionary.
+    Ran inside a process pool.
+    """
     import os
     import smooth.util
-    import subprocess
 
     # Sets to warning level. Disables TensorFlow's verbose messages about GPUs.
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-    def nvidia_smi():
-        res = subprocess.run("nvidia-smi", stdout=subprocess.PIPE)
-        return str(res.stdout).replace("\\n", "\n")
-
     if _config.gpus > 0:
         process_id = smooth.util.get_process_id()
-        # print("Before ({}):\n{}".format(process_id, nvidia_smi(),))
 
         smooth.util.tensorflow_init(gpu_indices=[process_id % _config.gpus])
-        # print("After ({}):\n{}".format(process_id, nvidia_smi(),))
     else:
         smooth.util.tensorflow_init(gpu_indices=[])
 
@@ -100,7 +105,6 @@ def train_model(args):
         dataset=dataset, log_dir=hparams["log_dir"], **model_hparams
     )
 
-    # res = smooth.config.shorten_hyperparams(hparams)
     res = hparams
     res.update(updates)
 

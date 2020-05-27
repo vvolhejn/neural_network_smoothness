@@ -1,8 +1,12 @@
+"""
+Creates training jobs to run on the IST Austria cluster.
+"""
+
 import subprocess
 import os
 import shutil
 
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 import click
 import yaml
 
@@ -74,7 +78,6 @@ def main(config_path):
         config_path="run_config.yaml",
     )
 
-    # print(template.replace("{", "\{{"))
     preview(format_dict)
     print("Config:")
     print(config)

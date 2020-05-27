@@ -1,6 +1,5 @@
 import itertools
-import re
-from typing import Dict, Any, List
+from typing import Dict, Any
 from collections import defaultdict
 
 import yaml
@@ -10,6 +9,11 @@ import smooth.util
 
 
 class Config:
+    """
+    Determines a grid of hyperparameter combinations to try, along with some global
+    configuration
+    """
+
     KEYS = [
         "name",
         "cpus",
@@ -51,7 +55,7 @@ class Config:
 
 class HyperparamsGrid:
     """
-    Represents a cartesian product of dictionaries.
+    Represents a (multidimensional) cartesian product of "axes" represented by dicts.
     """
 
     def __init__(self, axes):
@@ -162,13 +166,3 @@ def merge_dicts(dicts):
     [('a', 1), ('b', 2), ('c', 3), ('d', 4)]
     """
     return dict(itertools.chain(*(list(d.items()) for d in dicts)))
-
-
-if __name__ == "__main__":
-    cfg = Config("run_config.yaml")
-    print(cfg.hyperparams_grid.axes)
-    for x in cfg.hyperparams_grid.iterator():
-        print(x)
-    print()
-    print(cfg.hyperparams_grid.axes[1])
-    print([zip_dicts(axis) for axis in cfg.hyperparams_grid.axes])

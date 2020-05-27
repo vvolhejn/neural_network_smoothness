@@ -47,7 +47,7 @@ def test_relu_net():
 def test_path_length_f():
     x1 = tf.constant([[1.0, 1.0]])
     x2 = tf.constant([[2.0, 1.0]])
-    tv = smooth.measures.path_length_one_sample(
+    tv = smooth.measures.total_variation_along_segment(
         model, x1, x2, n_samples=100, derivative=False
     )
     # x1 and x2 are selected in a way where the function between them is just linear,
@@ -58,14 +58,14 @@ def test_path_length_f():
 def test_path_length_d():
     x1 = tf.constant([[1.0, 1.0]])
     x2 = tf.constant([[2.0, 1.0]])
-    tv = smooth.measures.path_length_one_sample(
+    tv = smooth.measures.total_variation_along_segment(
         model, x1, x2, n_samples=100, derivative=True
     )
     # Within one "segment" of this piecewise linear function, the Jacobian is constant
     assert np.isclose(tv, 0, atol=0.5)
 
     x2 = tf.constant([[-1.0, 1.0]])
-    tv = smooth.measures.path_length_one_sample(
+    tv = smooth.measures.total_variation_along_segment(
         model, x1, x2, n_samples=100, derivative=True
     )
     # Here we cross a border and the Jacobian changes by 2 at two positions,
@@ -109,7 +109,7 @@ def test_path_length_differentiable():
         for it in range(5):
             with tf.GradientTape() as tape:
                 tape.watch(model.weights)
-                y = smooth.measures.path_length_one_sample(
+                y = smooth.measures.total_variation_along_segment(
                     model, x1, x2, 10, derivative=use_derivative
                 )
 

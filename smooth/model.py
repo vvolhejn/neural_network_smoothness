@@ -1,6 +1,8 @@
-import re
+"""
+Function which create models either by training or by directly computing their parameters.
+"""
+
 import os
-import datetime
 from typing import List, Optional
 import warnings
 
@@ -19,6 +21,7 @@ assert tf.__version__[0] == "2"
 
 
 def split_dataset(x, y, first_part=0.9):
+    """Creates a validation set."""
     split = int(len(x) * first_part)
     x_train = x[:split]
     y_train = y[:split]
@@ -28,6 +31,10 @@ def split_dataset(x, y, first_part=0.9):
 
 
 class PCALayer(tf.keras.layers.Dense):
+    """
+    Applies PCA as a dense layer.
+    """
+
     def __init__(self, dims, xs: np.ndarray):
         pca = sklearn.decomposition.PCA(n_components=dims)
         pca.fit(xs.reshape(len(xs), -1))
@@ -46,6 +53,9 @@ def get_shallow(
     activation: str,  # "relu", "tanh" etc.
     pca_dims: Optional[int] = None,
 ) -> tf.keras.Model:
+    """
+    Create a two-layer neural network without training it.
+    """
     # Classification or regression?
     classification = "Classification" in type(dataset).__name__
 
@@ -59,8 +69,6 @@ def get_shallow(
         tf.keras.layers.Dense(
             hidden_size,
             activation=activation,
-            # kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
-            # bias_initializer=VarianceScaling(scale=init_scale, mode="fan_out"),
             kernel_initializer=VarianceScaling(
                 scale=init_scale, mode="fan_avg", distribution="uniform"
             ),
@@ -69,8 +77,6 @@ def get_shallow(
     model.add(
         tf.keras.layers.Dense(
             dataset.n_classes if classification else 1,
-            # kernel_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
-            # bias_initializer=VarianceScaling(scale=init_scale, mode="fan_in"),
             kernel_initializer=VarianceScaling(
                 scale=init_scale, mode="fan_avg", distribution="uniform"
             ),
@@ -83,8 +89,8 @@ def get_shallow(
 
 def train_shallow(
     dataset: smooth.datasets.Dataset,
-    learning_rate,
-    init_scale,
+    learning_rate: float,
+    init_scale: float,
     hidden_size=200,
     epochs=1000,
     batch_size=None,
@@ -105,25 +111,31 @@ def train_shallow(
     pca_dims=None,
 ):
     """
-    Trains a single-layer neural network.
+    Train a two-layer neural network.
 
-    :param dataset:
-    :param learning_rate:
-    :param init_scale:
-    :param hidden_size:
-    :param epochs:
+    :param dataset: the Dataset to use
+    :param learning_rate: Learning rate for SGD
+    :param init_scale: Model initialization scale
+    :param hidden_size: Size of the hidden layer
+    :param epochs: How many epochs to train for
     :param batch_size: If None, will perform GD rather than SGD.
     :param iteration: Used only as an additional identifier
         (for training multiple models with the same hyperparams)
     :param verbose: Verbosity level passed to `model.fit`
     :param error_threshold: Stop training when this loss is reached.
     :param log_dir: Where to save Tensorboard logs. If None, Tensorboard is not used.
-    :param callbacks: list of tf.keras.Callback functions
-    :param activation: activation function for the hidden layer
-    :param gradient_norm_reg_coef: strength of gradient norm regularization
-    :param weights_product_reg_coef: strength of weights product regularization
-    :param early_stopping_patience: how many epochs to wait for loss to improve
-    :param early_stopping_min_delta: minimum loss difference to count as improvement
+    :param callbacks: List of tf.keras.Callback functions
+    :param activation: Activation function for the hidden layer
+    :param gradient_norm_reg_coef: Gradient norm regularization
+    :param gradient_norm_squared_reg_coef: Squared gradient norm regularization
+    :param weights_product_reg_coef: Weights product regularization
+    :param path_length_f_reg_coef: Function path length regularization
+    :param path_length_d_reg_coef: Gradient path length regularization
+    :param early_stopping_patience: How many epochs to wait for loss to improve
+    :param early_stopping_min_delta: Minimum loss difference to count as improvement
+    :param model_id: Override the generated model id
+    :param pca_dims: Reduce the dataset using PCA to this many dimensions
+
     :return: A trained model.
     """
     if callbacks is None:
@@ -131,33 +143,14 @@ def train_shallow(
 
     model = get_shallow(dataset, init_scale, hidden_size, activation, pca_dims)
 
-    if gradient_norm_reg_coef > 0:
-        model = RegularizedGradientModel(
-            model,
-            coef=gradient_norm_reg_coef,
-            # x_val=dataset.x_test,
-        )
-
-    if gradient_norm_squared_reg_coef > 0:
-        model = RegularizedGradientModel(
-            model,
-            coef=gradient_norm_squared_reg_coef,
-            # x_val=dataset.x_test,
-            power=2,
-        )
-
-    if weights_product_reg_coef > 0:
-        model = RegularizedWeightsProductModel(model, coef=weights_product_reg_coef,)
-
-    if path_length_f_reg_coef > 0:
-        model = RegularizedPathLengthModel(
-            model, coef=path_length_f_reg_coef, derivative=False
-        )
-
-    if path_length_d_reg_coef > 0:
-        model = RegularizedPathLengthModel(
-            model, coef=path_length_d_reg_coef, derivative=True
-        )
+    model = add_explicit_regularization(
+        model,
+        gradient_norm_reg_coef,
+        gradient_norm_squared_reg_coef,
+        weights_product_reg_coef,
+        path_length_f_reg_coef,
+        path_length_d_reg_coef,
+    )
 
     classification = "Classification" in type(dataset).__name__
     model.compile(
@@ -193,6 +186,7 @@ def train_shallow(
             )
         )
 
+    # Add early stopping if desired.
     assert (early_stopping_min_delta is None) == (early_stopping_patience is None)
     if early_stopping_patience is not None:
         callbacks.append(
@@ -219,7 +213,6 @@ def train_shallow(
         file_writer.set_as_default()
 
         measures_cb = smooth.callbacks.Measures(dataset)
-        # tensorboard_cb = smooth.callbacks.TensorBoard(model.log_dir, validation_freq)
 
         callbacks += [measures_cb]
 
@@ -238,6 +231,39 @@ def train_shallow(
     model.plot_title = "lr={:.2f}, init_scale={:.2f}, ".format(
         learning_rate, init_scale
     ) + "h={}, ep={}".format(hidden_size, epochs)
+
+    return model
+
+
+def add_explicit_regularization(
+    model: tf.keras.Model,
+    gradient_norm_reg_coef: float,
+    gradient_norm_squared_reg_coef: float,
+    weights_product_reg_coef: float,
+    path_length_f_reg_coef: float,
+    path_length_d_reg_coef: float,
+):
+    """Wraps the model to add explicit regularization."""
+    if gradient_norm_reg_coef > 0:
+        model = RegularizedGradientModel(model, coef=gradient_norm_reg_coef,)
+
+    if gradient_norm_squared_reg_coef > 0:
+        model = RegularizedGradientModel(
+            model, coef=gradient_norm_squared_reg_coef, power=2,
+        )
+
+    if weights_product_reg_coef > 0:
+        model = RegularizedWeightsProductModel(model, coef=weights_product_reg_coef,)
+
+    if path_length_f_reg_coef > 0:
+        model = RegularizedPathLengthModel(
+            model, coef=path_length_f_reg_coef, derivative=False
+        )
+
+    if path_length_d_reg_coef > 0:
+        model = RegularizedPathLengthModel(
+            model, coef=path_length_d_reg_coef, derivative=True
+        )
 
     return model
 
@@ -349,6 +375,9 @@ def is_differentiable(model: tf.keras.Model):
 
 
 def train_model(name, dataset, **kwargs):
+    """
+    Train a neural network or a kernel ridge regression model.
+    """
     if name == "krr":
         krr = sklearn.kernel_ridge.KernelRidge(kernel="poly", coef0=1, **kwargs)
         krr.fit(dataset.x_train, dataset.y_train)
@@ -372,6 +401,9 @@ def train_model(name, dataset, **kwargs):
 
 
 class RegularizedGradientModel(tf.keras.Model):
+    """
+    A wrapper which adds to the loss a regularization term penalizing large gradients.
+    """
     def __init__(
         self, model: tf.keras.Model, coef: float, x_val: np.ndarray = None, power=1,
     ):
@@ -398,6 +430,10 @@ class RegularizedGradientModel(tf.keras.Model):
 
 
 class RegularizedWeightsProductModel(tf.keras.Model):
+    """
+    A wrapper which adds to the loss a regularization term penalizing
+    the weights product measure.
+    """
     def __init__(
         self, model: tf.keras.Model, coef: float,
     ):
@@ -411,6 +447,10 @@ class RegularizedWeightsProductModel(tf.keras.Model):
 
 
 class RegularizedPathLengthModel(tf.keras.Model):
+    """
+    A wrapper which adds to the loss a regularization term penalizing
+    the function or gradient path length.
+    """
     def __init__(
         self, model: tf.keras.Model, derivative: bool, coef: float,
     ):
@@ -427,7 +467,7 @@ class RegularizedPathLengthModel(tf.keras.Model):
         self.add_loss(
             self.coef
             * tf.reduce_sum(
-                smooth.measures.path_length_one_sample(
+                smooth.measures.total_variation_along_segment(
                     self.model,
                     x_pairs[0],
                     x_pairs[1],

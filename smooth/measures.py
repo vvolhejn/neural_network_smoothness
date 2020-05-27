@@ -1,4 +1,6 @@
-from typing import Callable
+"""
+Functions used to measure trained models.
+"""
 from math import ceil
 
 import tensorflow as tf
@@ -17,6 +19,10 @@ def get_measures(
     precise_in_1d=False,
     is_classification=False,
 ):
+    """
+    Takes a model's measures on a dataset.
+    Returns a dictionary with the measured values.
+    """
     res = {}
     x_train, y_train = dataset.x_train, dataset.y_train
     x_test, y_test = dataset.x_test, dataset.y_test
@@ -39,12 +45,14 @@ def get_measures(
             return {"error": str(e)}
 
     if smooth.model.is_differentiable(model):
+        # These measures can only be computed if we have access to the gradient.
         res["gradient_norm_train"] = gradient_norm(model, x_train[:samples])
         res["gradient_norm_test"] = gradient_norm(model, x_test[:samples])
         res["gradient_norm_squared_train"] = gradient_norm(model, x_train[:samples], power=2)
         res["gradient_norm_squared_test"] = gradient_norm(model, x_test[:samples], power=2)
-        # Technically, we need a keras model for `weights_rms`.
-        # But for now differentiable == keras anyways.
+
+        # Technically, we need a two-layer NN for these measures.
+        # But in our case, differentiable == two-layer NN.
         res["weights_rms"] = weights_rms(model)
         res["weights_product"] = float(weights_product(model))
 
@@ -58,17 +66,19 @@ def get_measures(
     is_1d = x_test[0].squeeze().shape == () and y[0].squeeze().shape == ()
 
     if is_1d and precise_in_1d:
-        # 1D case - we can solve this deterministically
+        # 1D case - we can compute measures deterministically
+        # However we get slightly different measures because of the weighing
         x_min, x_max = np.min(x_test, axis=0), np.max(x_test, axis=0)
-        res["path_length_f_test"] = path_length_one_sample(
+        res["path_length_f_test"] = total_variation_along_segment(
             model, x_min, x_max, n_samples=samples, derivative=False,
         )
 
         if smooth.model.is_differentiable(model):
-            res["path_length_d_test"] = path_length_one_sample(
+            res["path_length_d_test"] = total_variation_along_segment(
                 model, x_min, x_max, n_samples=samples, derivative=True,
             )
     else:
+        # General case
         for suffix, x in [("_train", x_train), ("_test", x_test)]:
             res["path_length_f" + suffix] = path_length(
                 model, x, segments_per_batch=100, segments=samples
@@ -80,6 +90,7 @@ def get_measures(
                 )
 
             if is_classification:
+                # For classification, we also take the measures after softmax.
                 res["path_length_f_softmax" + suffix] = path_length(
                     model, x, segments_per_batch=100, segments=samples, softmax=True,
                 )
@@ -98,6 +109,7 @@ def get_measures(
 
 
 def weights_rms(model: tf.keras.Model):
+    """Returns the root mean square of the model's weights and biases."""
     total = 0
     n_weights = 0
     for weight_matrix in model.get_weights():
@@ -108,6 +120,10 @@ def weights_rms(model: tf.keras.Model):
 
 
 def weights_product(model: tf.keras.Model):
+    """
+    Takes a two-layer NN. For each hidden unit, computes ||w^(1)|| * |w^(2)|
+    and returns the sum of these values.
+    """
     # Warning: Returns a tf.Tensor
     # We take only the last 4 elements of `model.weights` since there might be
     # a PCA layer before that
@@ -151,6 +167,10 @@ def gradient_norm(model: tf.keras.Model, x, power=1):
 
 @tf.custom_gradient
 def stable_norm(x):
+    """
+    There are numerical issues when the taking the gradient of ||x|| when x is close to 0.
+    This fixes them.
+    """
     y = tf.norm(x, axis=2)
 
     def grad(dy):
@@ -159,33 +179,27 @@ def stable_norm(x):
     return y, grad
 
 
-def _path_length(samples: tf.Tensor):
+def total_variation(samples: tf.Tensor):
     """
     Given evenly spaced samples of a function's values, computes an approximation
-    of the path length, that is the sum of the distances of consecutive samples.
+    of the total variation, that is the sum of the distances of consecutive samples.
     For scalar samples, this means the sum of absolute values of the first difference,
     for vector-valued functions we sum the l2 norms of the first difference.
 
     The first axis is interpreted as the batch axis.
 
-    >>> float(_path_length(tf.constant([[1, 2, 3, 1]], dtype=tf.float32)))
+    >>> float(total_variation(tf.constant([[1, 2, 3, 1]], dtype=tf.float32)))
     4.0
-    >>> l = _path_length(tf.constant([[[0, 0], [1, 1], [1, 2]]], dtype=tf.float32))
+    >>> l = total_variation(tf.constant([[[0, 0], [1, 1], [1, 2]]], dtype=tf.float32))
     >>> print("{:.3f}".format(float(l)))
     2.414
-    >>> np.array(_path_length(tf.constant([[0, 0], [1, 1], [1, 2]], dtype=tf.float32)))
+    >>> np.array(total_variation(tf.constant([[0, 0], [1, 1], [1, 2]], dtype=tf.float32)))
     array([0., 0., 1.], dtype=float32)
     """
     assert isinstance(samples, tf.Tensor)
 
-    # if tf.rank(samples)== 2:
-    # print("Shape0: ", samples.shape)
-    # samples = tf.expand_dims(samples, axis=-1)
-
     res = samples[:, 1:, :] - samples[:, :-1, :]
-
     res = stable_norm(res)
-    # res = tf.norm(res, axis=2)
     res = tf.reduce_sum(res, axis=1)
 
     return res
@@ -200,15 +214,12 @@ def _interpolate(a: tf.Tensor, b: tf.Tensor, n_samples):
     >>> _interpolate([[0, 2], [1, 1]], [[2, 0], [2, 2]], 3).round(1).tolist()
     [[[0.0, 2.0], [1.0, 1.0]], [[1.0, 1.0], [1.5, 1.5]], [[2.0, 0.0], [2.0, 2.0]]]
     """
-    # a, b = np.array(a), np.array(b)
-    # assert a.shape == b.shape
-
     w = tf.linspace(0.0, 1.0, n_samples)
     res = tf.tensordot(w, a, axes=0) + tf.tensordot(1.0 - w, b, axes=0)
     return res
 
 
-def path_length_one_sample(
+def total_variation_along_segment(
     model: tf.keras.Model,
     x1: tf.Tensor,
     x2: tf.Tensor,
@@ -216,8 +227,11 @@ def path_length_one_sample(
     derivative: bool,
     softmax=False,
 ):
+    """
+    Computes the total variation of a model's function along a segment.
+    Optionally takes the derivative (gradient) first.
+    """
     assert not softmax
-    # assert x1.shape == x2.shape
     tf.debugging.assert_all_finite(x1, "x1")
     tf.debugging.assert_all_finite(x2, "x2")
     samples = _interpolate(x1, x2, n_samples)
@@ -227,24 +241,19 @@ def path_length_one_sample(
     )
 
     if not derivative:
-        # output_flat = model.predict(samples_flat, batch_size=1024)
         output_flat = model(samples_flat)
         tf.debugging.assert_all_finite(output_flat, "output_flat0")
         if softmax:
             output_flat = tf.nn.softmax(output_flat)
     else:
         with tf.GradientTape() as g:
-            # x = tf.constant(samples_flat)
             x = samples_flat
             g.watch(x)
             y = model(x)
             if softmax:
                 y = tf.nn.softmax(y)
+
         output_flat = g.batch_jacobian(y, x)
-        # We just stretch the Jacobian into a single vector and take the path length
-        # of this vector "moving around".
-        # (meaning we sum the Fro   benius norms of the first difference)
-        # Does this make any sense mathematically?
         output_flat = tf.reshape(output_flat, [tf.shape(output_flat)[0], -1])
 
     tf.debugging.assert_all_finite(output_flat, "output_flat")
@@ -252,12 +261,12 @@ def path_length_one_sample(
     output = tf.reshape(
         output_flat, tf.concat([[n_samples, -1], tf.shape(output_flat)[1:]], axis=0)
     )
+
+    # Swap the first two axes so that the batch axis comes first.
     p = tf.concat([[1, 0], tf.range(2, tf.rank(output))], axis=0)
-
     output = tf.transpose(output, p)
-    # tf.print(tf.shape(output))
-    res = _path_length(output)
 
+    res = total_variation(output)
     return res
 
 
@@ -271,9 +280,9 @@ def path_length(
     softmax=False,
 ):
     """
-    Takes two random points from `x_input` and calculates the path length of the image
-    of the line segment between the two points when passed through the model.
-    This is repeated `n_segments` times and the average is taken.
+    Takes two random points from `x_input` and calculates the model's total variation
+    along the segment between the two points.
+    Repeats `n_segments` times and takes the mean.
     """
     x = x_input[np.random.randint(len(x_input), size=(2 * segments,))]
     x = np.array([x[:segments], x[segments:]])
@@ -286,7 +295,7 @@ def path_length(
         x1, x2 = np.swapaxes(batch, 0, 1)
         x1 = tf.constant(x1)
         x2 = tf.constant(x2)
-        cur = path_length_one_sample(
+        cur = total_variation_along_segment(
             model, x1, x2, samples_per_segment, derivative, softmax=softmax
         )
 

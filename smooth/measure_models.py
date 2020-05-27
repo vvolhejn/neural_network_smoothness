@@ -1,3 +1,7 @@
+"""
+Obsolete. Used to re-measure previously trained models.
+"""
+
 import multiprocessing
 import os
 import sys
@@ -7,7 +11,6 @@ import pandas as pd
 import tqdm
 import click
 
-# from smooth import util
 import smooth.util
 
 
