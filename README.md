@@ -1,10 +1,10 @@
 # Smoothness of Functions Learned by Neural Networks
 
 Code of my internship project at IST Austria,
-which was then used as my Bachelor thesis.
+which was then used as my Bachelor thesis at Charles University.
 The internship took place between February and April 2020.
 
-## Abstract
+## Thesis abstract
 
 Modern neural networks can easily fit their training set perfectly.
 Surprisingly, they generalize well despite being "overfit" in this way,
@@ -19,6 +19,8 @@ they are implicitly being optimized for. We exclude the possibility that
 smoothness measures based on the first derivative (the gradient) are being
 implicitly optimized for. Measures based on the second derivative (the
 Hessian), on the other hand, show promising results.
+
+(Thesis will be made available soon)
 
 ## Organization
 
