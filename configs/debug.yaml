@@ -5,7 +5,7 @@ max_time: 1:00:00
 memory_gb: 16
 # What information should SLURM send about the job via email? (see docs)
 mail_type: END
-debug: True
+debug: False
 
 hyperparams_grid:
     - dataset.name: gp
@@ -20,7 +20,7 @@ hyperparams_grid:
 
     - model.name: shallow
     - model.hidden_size: [4,16,64]
-    - model.epochs: 20000
+    - model.epochs: 100
     - model.batch_size: 64
     - model.iteration: [0]
 
