@@ -1,0 +1,76 @@
+confirm: false
+cpus: 45
+debug: false
+gpus: 0
+hyperparams_grid:
+- dataset.name:
+  - mnist01
+  - mnist02
+  - mnist12
+  - mnist03
+  - mnist13
+  - mnist23
+  - mnist04
+  - mnist14
+  - mnist24
+  - mnist34
+  - mnist05
+  - mnist15
+  - mnist25
+  - mnist35
+  - mnist45
+  - mnist06
+  - mnist16
+  - mnist26
+  - mnist36
+  - mnist46
+  - mnist56
+  - mnist07
+  - mnist17
+  - mnist27
+  - mnist37
+  - mnist47
+  - mnist57
+  - mnist67
+  - mnist08
+  - mnist18
+  - mnist28
+  - mnist38
+  - mnist48
+  - mnist58
+  - mnist68
+  - mnist78
+  - mnist09
+  - mnist19
+  - mnist29
+  - mnist39
+  - mnist49
+  - mnist59
+  - mnist69
+  - mnist79
+  - mnist89
+- dataset.samples_train:
+  - 10000
+- model.name:
+  - shallow
+- model.hidden_size:
+  - 256
+- model.epochs:
+  - 25000
+- model.batch_size:
+  - 64
+- model.iteration:
+  - 0
+- model.learning_rate:
+  - 0.1
+- model.init_scale:
+  - 0.01
+- model.error_threshold:
+  - 1.0e-05
+- model.path_length_d_reg_coef:
+  - 0
+  - 1.0e-05
+mail_type: END
+max_time: '60:00:00'
+memory_gb: 90
+name: path_length_d_reg
