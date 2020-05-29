@@ -1,3 +1,3 @@
 #!/bin/bash
-python3 -m pytest --rootdir smooth --disable-pytest-warnings
-
+cd smooth
+python3 -m pytest --rootdir . --disable-pytest-warnings

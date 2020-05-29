@@ -38,6 +38,8 @@ module load cuda/10.0 cudnn/7.5 nccl/2.4.2
 module load tensorflow/python3/2.1.0
 export PYTHONPATH={pythonpath}
 export SMOOTH_CONFIG={config_path}
+export SMOOTH_DB_URL={db_url}
+export SMOOTH_DB_NAME={db_name}
 srun --cpu_bind=verbose {command}
 """
 
@@ -65,6 +67,16 @@ def main(config_path):
         else template_gpu.format(gpus=config.gpus, gpu_architecture=GPU_ARCHITECTURE)
     )
 
+    try:
+        db_url = os.environ["SMOOTH_DB_URL"]
+        db_name = os.environ["SMOOTH_DB_NAME"]
+    except KeyError:
+        raise RuntimeError(
+            "Please set the following environment variables:\n"
+            "SMOOTH_DB_URL: URL of the MongoDB database for Sacred\n"
+            "SMOOTH_DB_NAME: name of the MongoDB database for Sacred"
+        )
+
     format_dict = dict(
         job_name=config.name,
         output_file="slurm_output.txt",
@@ -76,6 +88,8 @@ def main(config_path):
         pythonpath=os.environ.get("PYTHONPATH") or "",
         command="python3 -m smooth.train_models_general with log_dir=.",
         config_path="run_config.yaml",
+        db_url=db_url,
+        db_name=db_name,
     )
 
     preview(format_dict)
