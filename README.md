@@ -26,20 +26,19 @@ Hessian), on the other hand, show promising results.
 
 The repo is organized into the following directories:
 
-- `smooth`: code for running experiments
-- `thesis_data`: data from experiments which ended up being used
+- `smooth`: Python package for running experiments
+- `thesis_data`: data from experiments which appear
     in the thesis, along with configuration YAML files which can be used
     to reproduce the experiments.
 - `thesis_notebooks`: simple Jupyter notebooks which calculate the reported
     results from data in `thesis_data`
 
-The remaining directories are not meant for external use:
-- `configs`: "dirty" configuration YAML files used to run experiments
+The remaining directories were used during the exploratory phase of the work and have not been cleaned up. Thus, they are not meant for external use.
+
 - `notebooks`: "dirty" Jupyter notebooks used for analyzing experimental
-    results. These have not been cleaned up and the old ones likely won't
-    work with the new codebase at all.
-- `logs`: not in the repo due to its size; contains all data collected
-    during the experiments
+    results. These have not been cleaned up and it is possible that the older notebooks will not work with the code from `smooth` which has changed since the notebook's creation.
+- `configs`: configuration YAML files used to run experiments
+- `logs`: not included in the repository due to its size; contains all data which was collected during the experiments
 
 ## Running experiments
 
@@ -54,3 +53,12 @@ where `my_config.yaml` is the configuration file to use; see `configs` for examp
 The experiment is saved using [Sacred](https://sacred.readthedocs.io/en/stable/)
 into a MongoDB database. For this reason, the environment variables `SMOOTH_DB_URL`
 and `SMOOTH_DB_NAME` must be set accordingly.
+
+## Naming
+
+Some of the terms used in the code do not correspond to the ones used in the thesis.
+The reason is that the code predates the thesis text and the names were kept
+to retain backwards compatibility with the experiments.
+The most significant difference is that in the code,
+_function path length_ and _gradient path length_ are referred to as
+`path_length_f` and `path_length_d` respectively.
