@@ -1,30 +1,29 @@
 # Smoothness of Functions Learned by Neural Networks
 
-Code of my internship project at IST Austria,
-which was then used as my Bachelor thesis at Charles University.
-The internship took place between February and April 2020.
+Code of my internship project conducted at IST Austria's
+[Machine Learning and Computer Vision Group](http://pub.ist.ac.at/~chl/),
+lead by Christoph Lampert. The internship took place between
+February and April 2020.
 
-## Thesis abstract
+The results of the project were published at the
+[German Conference in Pattern Recognition 2020](https://www.gcpr-vmv-vcbm-2020.uni-tuebingen.de/) as _Does SGD Implicitly Optimize for Smoothness_
+and also as my [Bachelor thesis](https://dspace.cuni.cz/handle/20.500.11956/119446)
+at Charles University in Prague.
 
-Modern neural networks can easily fit their training set perfectly.
-Surprisingly, they generalize well despite being "overfit" in this way,
-defying the bias--variance trade-off. A prevalent explanation is that
-stochastic gradient descent has an implicit bias which leads it to learn
-functions which are simple, and these simple functions generalize well.
-However, the specifics of this implicit bias are not well understood. In this
-work, we explore the hypothesis that SGD is implicitly biased towards learning
-functions which are smooth. We propose several measures to formalize the
-intuitive notion of smoothness, and conduct experiments to determine whether
-they are implicitly being optimized for. We exclude the possibility that
-smoothness measures based on the first derivative (the gradient) are being
-implicitly optimized for. Measures based on the second derivative (the
-Hessian), on the other hand, show promising results.
+## GCPR abstract
 
-(Thesis will be made available soon)
+Modern neural networks can easily fit their training set perfectly. Surprisingly, despite being "overfit" in this way, they tend to generalize well to future data, thereby defying the classic bias--variance trade-off of machine learning theory.
+Of the many possible explanations, a prevalent one is that training by stochastic gradient descent (SGD) imposes an implicit bias that leads it to learn simple functions, and these simple functions generalize well.
+However, the specifics of this implicit bias are not well understood.
+
+In this work, we explore the _smoothness conjecture_ which states that SGD is implicitly biased towards learning functions that are smooth.
+We propose several measures to formalize the intuitive notion of smoothness, and we conduct experiments to determine whether SGD indeed implicitly optimizes for these measures.
+Our findings rule out the possibility that smoothness measures based on first-order derivatives are being implicitly enforced.
+They are supportive, though, of the smoothness conjecture for measures based on second-order derivatives.
 
 ## Organization
 
-The repo is organized into the following directories:
+The repository is organized into the following directories:
 
 - `smooth`: Python package for running experiments
 - `thesis_data`: data from experiments which appear
@@ -56,8 +55,9 @@ and `SMOOTH_DB_NAME` must be set accordingly.
 
 ## Naming
 
-Some of the terms used in the code do not correspond to the ones used in the thesis.
-The reason is that the code predates the thesis text and the names were kept
+Some of the terms used in the code do not correspond to the ones used in the
+published work.
+The reason is that the code predates the published text and the names were kept
 to retain backwards compatibility with the experiments.
 The most significant difference is that in the code,
 _function path length_ and _gradient path length_ are referred to as
